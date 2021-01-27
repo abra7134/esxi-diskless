@@ -117,6 +117,12 @@ echo
 
 let _progress_number=1
 
+if [ -s "${UBUNTU_ISO_PATH}" ]
+then
+  error "The resulted ISO file '${UBUNTU_ISO_PATH}' is already exists" \
+        "Please remove it and start this script again"
+fi
+
 progress "Checking requirements"
 check_commands \
   cat \
