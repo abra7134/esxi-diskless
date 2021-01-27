@@ -167,6 +167,14 @@ debootstrap \
   "${temp_dir}"/chroot/ \
   http://archive.ubuntu.com/ubuntu
 
+progress "Optimize a filesystem tree before a squashing"
+rm --recursive \
+  "${temp_dir}"/chroot/usr/share/man/?? \
+  "${temp_dir}"/chroot/usr/share/man/??_* \
+  "${temp_dir}"/chroot/usr/share/locale/* \
+  "${temp_dir}"/chroot/var/cache/apt/archives/*.deb \
+  "${temp_dir}"/chroot/var/lib/apt/lists/*
+
 progress "Squashing a filesystem tree (mksquashfs)"
 umount \
   "${temp_dir}"/chroot/proc \
