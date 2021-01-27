@@ -128,12 +128,11 @@ check_root_run
 
 progress "Creating a temporary directories"
 temp_dir=$(mktemp -d)
-pushd "${temp_dir}" >/dev/null
 mkdir --parents \
-  chroot \
-  image/casper \
-  image/install \
-  image/isolinux
+  "${temp_dir}"/chroot \
+  "${temp_dir}"/image/casper \
+  "${temp_dir}"/image/install \
+  "${temp_dir}"/image/isolinux
 
 progress "Bootstrapping an Ubuntu LiveCD filesystem tree (debootstrap)"
 debootstrap \
@@ -141,16 +140,16 @@ debootstrap \
   --include=apt-utils,casper,linux-generic \
   --variant=minbase \
   "${UBUNTU_SUITE}" \
-  chroot/ \
+  "${temp_dir}"/chroot/ \
   http://archive.ubuntu.com/ubuntu
 
 progress "Squashing a filesystem tree (mksquashfs)"
 umount \
-  chroot/proc \
-  chroot/sys
+  "${temp_dir}"/chroot/proc \
+  "${temp_dir}"/chroot/sys
 mksquashfs \
-  chroot/ \
-  image/casper/filesystem.squashfs \
+  "${temp_dir}"/chroot/ \
+  "${temp_dir}"/image/casper/filesystem.squashfs \
   ${MKSQUSHFS_OPTS} \
   -e boot/
 
@@ -158,8 +157,8 @@ progress "Adding a kernel and initrd to Ubuntu LiveCD tree"
 for i in config initrd.img vmlinuz
 do
   cp --verbose \
-    chroot/boot/${i}-* \
-    image/casper/${i}
+    "${temp_dir}"/chroot/boot/${i}-* \
+    "${temp_dir}"/image/casper/${i}
 done
 
 #rm -r "${temp_dir}"
