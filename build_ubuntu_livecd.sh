@@ -10,7 +10,7 @@ UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
 UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v1.iso}"
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
-UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-toram}"
+UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram vga=792}"
 
 set -o errexit
 trap internal ERR
@@ -152,7 +152,8 @@ check_root_run
 
 progress "Creating a temporary directories"
 temp_dir=$(mktemp -d)
-mkdir --parents \
+mkdir --verbose \
+  --parents \
   "${temp_dir}"/chroot \
   "${temp_dir}"/image/casper \
   "${temp_dir}"/image/install \
@@ -161,7 +162,7 @@ mkdir --parents \
 progress "Bootstrapping an Ubuntu LiveCD filesystem tree (debootstrap)"
 debootstrap \
   --arch="${UBUNTU_ARCH}" \
-  --include=apt-utils,casper,linux-generic \
+  --include=apt-utils,casper,console-setup,ifupdown,linux-virtual,resolvconf \
   --variant=minbase \
   "${UBUNTU_SUITE}" \
   "${temp_dir}"/chroot/ \
@@ -174,9 +175,21 @@ rm --recursive \
   "${temp_dir}"/chroot/usr/share/locale/* \
   "${temp_dir}"/chroot/var/cache/apt/archives/*.deb \
   "${temp_dir}"/chroot/var/lib/apt/lists/*
+# Create these directories and files to reduce errors on boot
+mkdir --verbose \
+  --parents \
+  "${temp_dir}"/chroot/usr/lib/update-notifier \
+  "${temp_dir}"/chroot/usr/lib/ubuntu-release-upgrader \
+  "${temp_dir}"/chroot/var/crash \
+  "${temp_dir}"/chroot/var/lib/polkit-1/localauthority/50-local.d
+touch \
+  "${temp_dir}"/chroot/etc/default/apport \
+  "${temp_dir}"/chroot/usr/lib/update-notifier/apt-check \
+  "${temp_dir}"/chroot/usr/lib/ubuntu-release-upgrader/check-new-release \
+  "${temp_dir}"/chroot/usr/lib/ubuntu-release-upgrader/check-new-release-gtk
 
 progress "Squashing a filesystem tree (mksquashfs)"
-umount \
+umount --verbose \
   "${temp_dir}"/chroot/proc \
   "${temp_dir}"/chroot/sys
 mksquashfs \
@@ -186,7 +199,10 @@ mksquashfs \
   -e boot/
 
 progress "Adding a kernel and initrd to Ubuntu LiveCD tree"
-for i in config initrd.img vmlinuz
+for i in \
+  config \
+  initrd.img \
+  vmlinuz
 do
   cp --verbose \
     "${temp_dir}"/chroot/boot/${i}-* \
