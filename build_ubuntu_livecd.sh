@@ -4,12 +4,13 @@
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
 VERSION="0.1"
+MKISOFS_OPTS="-input-charset utf-8 -volid ubuntu"
 MKSQUSHFS_OPTS="-no-xattrs"
 UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
+UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
 UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v1.iso}"
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
 UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-toram}"
-UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
 
 set -o errexit
 trap internal ERR
@@ -118,10 +119,27 @@ let _progress_number=1
 
 progress "Checking requirements"
 check_commands \
+  cat \
   debootstrap \
+  dirname \
   mkisofs \
   mksquashfs \
-  mktemp
+  mktemp \
+  realpath
+
+progress "Checking required files"
+script_dir=$(dirname $(realpath "${0}"))
+for f in \
+  "${script_dir}"/isolinux/isolinux.bin \
+  "${script_dir}"/isolinux/ldlinux.c32
+do
+  if [ ! -s "${f}" ]
+  then
+    error \
+      "The required file '${f}' is not exist" \
+      "Please check archive of this script or use 'git checkout --force' command if it cloned from git"
+  fi
+done
 
 progress "Checking by runned root user"
 check_root_run
@@ -161,4 +179,39 @@ do
     "${temp_dir}"/image/casper/${i}
 done
 
-#rm -r "${temp_dir}"
+progress "Preparing isolinux loader for Ubuntu LiveCD tree"
+for f in \
+  "${script_dir}"/isolinux/isolinux.bin \
+  "${script_dir}"/isolinux/ldlinux.c32
+do
+  cp --verbose \
+    "${f}" \
+    "${temp_dir}"/image/isolinux
+done
+cat \
+> "${temp_dir}"/image/isolinux/isolinux.cfg \
+<<EOF
+DEFAULT live
+LABEL live
+  kernel /casper/vmlinuz
+  append boot=casper initrd=/casper/initrd.img ${UBUNTU_RUN_OPTIONS} --
+PROMPT 0
+EOF
+
+progress "Preparing a Ubuntu LiveCD image file (mkisofs)"
+mkisofs \
+  ${MKISOFS_OPTS} \
+  -boot-load-size 4 \
+  -boot-info-table \
+  -eltorito-boot isolinux/isolinux.bin \
+  -eltorito-catalog isolinux/boot.cat \
+  -joliet \
+  -no-emul-boot \
+  -output "${UBUNTU_ISO_PATH}" \
+  -rational-rock \
+  "${temp_dir}"/image
+
+progress "Remove a temporary directory"
+rm --recursive \
+  "${temp_dir}"
+info "Done"
