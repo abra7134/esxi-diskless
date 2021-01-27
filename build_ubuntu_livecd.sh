@@ -27,14 +27,14 @@ function _print {
     "info" )
       local info_message
       for info_message in "${@}"; do
-        printf "!!! ${info_message}\n"
+        printf -- "!!! ${info_message}\n"
       done
       echo
       ;;
     "progress" )
       local progress_message
       for progress_message in "${@}"; do
-        printf "[${_progress_number}] ${progress_message} ...\n"
+        printf -- "--> %i. %s ...\n" $((_progress_number)) "${progress_message}"
         let _progress_number+=1
       done
       ;;
@@ -45,7 +45,7 @@ function _print {
         echo
         local error_message
         for error_message in "${@}"; do
-          printf "%-${ident_length}s %s\n" "${ident}" "${error_message}"
+          printf -- "%-${ident_length}s %s\n" "${ident}" "${error_message}"
           ident=""
         done
         echo
@@ -79,7 +79,7 @@ function internal {
       "Happen in '${FUNCNAME[1]}' function call at ${BASH_LINENO[0]} line" \
       "Let the developer know or solve the problem yourself"
   else
-   _print internal \
+    _print internal \
       "Problem in '${FUNCNAME[2]}' -> '${FUNCNAME[1]}' function call at ${BASH_LINENO[1]} line:" \
       "${@}"
   fi
@@ -110,11 +110,11 @@ function check_root_run {
   fi
 }
 
-let _progress_number=1
-
 echo "Script for build Ubuntu LiveCD v${VERSION}"
 echo "suite:\"${UBUNTU_SUITE}\" arch:\"${UBUNTU_ARCH}\" output_iso_path:\"${UBUNTU_ISO_PATH}\""
 echo
+
+let _progress_number=1
 
 progress "Checking requirements"
 check_commands \
@@ -126,7 +126,7 @@ check_commands \
 progress "Checking by runned root user"
 check_root_run
 
-progress "Creating a temporary directory"
+progress "Creating a temporary directories"
 temp_dir=$(mktemp -d)
 pushd "${temp_dir}" >/dev/null
 mkdir --parents \
@@ -135,7 +135,7 @@ mkdir --parents \
   image/install \
   image/isolinux
 
-progress "Bootstrapping an Ubuntu LiveCD filesystem tree"
+progress "Bootstrapping an Ubuntu LiveCD filesystem tree (debootstrap)"
 debootstrap \
   --arch="${UBUNTU_ARCH}" \
   --include=apt-utils,casper,linux-generic \
@@ -144,7 +144,7 @@ debootstrap \
   chroot/ \
   http://archive.ubuntu.com/ubuntu
 
-progress "Squashing a filesystem tree"
+progress "Squashing a filesystem tree (mksquashfs)"
 umount \
   chroot/proc \
   chroot/sys
@@ -154,7 +154,7 @@ mksquashfs \
   ${MKSQUSHFS_OPTS} \
   -e boot/
 
-progress "Preparing tree for LiveCD"
+progress "Adding a kernel and initrd to Ubuntu LiveCD tree"
 for i in config initrd.img vmlinuz
 do
   cp --verbose \
