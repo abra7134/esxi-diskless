@@ -3,7 +3,7 @@
 # Script for build Ubuntu LiveCD
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-VERSION="0.1"
+MY_VERSION="0.1"
 MKISOFS_OPTS="-input-charset utf-8 -volid ubuntu"
 MKSQUSHFS_OPTS="-no-xattrs"
 UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
@@ -90,7 +90,7 @@ function internal {
 function check_commands {
   while [ -n "${1}" ]
   do
-    required_command="${1}"
+    local required_command="${1}"
     if ! type -P "${required_command}" >/dev/null
     then
       error \
@@ -111,7 +111,7 @@ function check_root_run {
   fi
 }
 
-echo "Script for build Ubuntu LiveCD v${VERSION}"
+echo "Script for build Ubuntu LiveCD v${MY_VERSION}"
 echo "suite:\"${UBUNTU_SUITE}\" arch:\"${UBUNTU_ARCH}\" output_iso_path:\"${UBUNTU_ISO_PATH}\""
 echo
 
@@ -134,10 +134,10 @@ check_commands \
   realpath
 
 progress "Checking required files"
-script_dir=$(dirname $(realpath "${0}"))
+my_dir=$(dirname $(realpath "${0}"))
 for f in \
-  "${script_dir}"/isolinux/isolinux.bin \
-  "${script_dir}"/isolinux/ldlinux.c32
+  "${my_dir}"/isolinux/isolinux.bin \
+  "${my_dir}"/isolinux/ldlinux.c32
 do
   if [ ! -s "${f}" ]
   then
@@ -152,12 +152,14 @@ check_root_run
 
 progress "Creating a temporary directories"
 temp_dir=$(mktemp -d)
+chroot_dir="${temp_dir}/chroot"
+image_dir="${temp_dir}/image"
 mkdir --verbose \
   --parents \
-  "${temp_dir}"/chroot \
-  "${temp_dir}"/image/casper \
-  "${temp_dir}"/image/install \
-  "${temp_dir}"/image/isolinux
+  "${chroot_dir}" \
+  "${image_dir}"/casper \
+  "${image_dir}"/install \
+  "${image_dir}"/isolinux
 
 progress "Bootstrapping an Ubuntu LiveCD filesystem tree (debootstrap)"
 debootstrap \
@@ -165,36 +167,36 @@ debootstrap \
   --include=apt-utils,casper,console-setup,ifupdown,linux-virtual,resolvconf \
   --variant=minbase \
   "${UBUNTU_SUITE}" \
-  "${temp_dir}"/chroot/ \
+  "${chroot_dir}" \
   http://archive.ubuntu.com/ubuntu
 
 progress "Optimize a filesystem tree before a squashing"
 rm --recursive \
-  "${temp_dir}"/chroot/usr/share/man/?? \
-  "${temp_dir}"/chroot/usr/share/man/??_* \
-  "${temp_dir}"/chroot/usr/share/locale/* \
-  "${temp_dir}"/chroot/var/cache/apt/archives/*.deb \
-  "${temp_dir}"/chroot/var/lib/apt/lists/*
+  "${chroot_dir}"/usr/share/man/?? \
+  "${chroot_dir}"/usr/share/man/??_* \
+  "${chroot_dir}"/usr/share/locale/* \
+  "${chroot_dir}"/var/cache/apt/archives/*.deb \
+  "${chroot_dir}"/var/lib/apt/lists/*
 # Create these directories and files to reduce errors on boot
 mkdir --verbose \
   --parents \
-  "${temp_dir}"/chroot/usr/lib/update-notifier \
-  "${temp_dir}"/chroot/usr/lib/ubuntu-release-upgrader \
-  "${temp_dir}"/chroot/var/crash \
-  "${temp_dir}"/chroot/var/lib/polkit-1/localauthority/50-local.d
+  "${chroot_dir}"/usr/lib/update-notifier \
+  "${chroot_dir}"/usr/lib/ubuntu-release-upgrader \
+  "${chroot_dir}"/var/crash \
+  "${chroot_dir}"/var/lib/polkit-1/localauthority/50-local.d
 touch \
-  "${temp_dir}"/chroot/etc/default/apport \
-  "${temp_dir}"/chroot/usr/lib/update-notifier/apt-check \
-  "${temp_dir}"/chroot/usr/lib/ubuntu-release-upgrader/check-new-release \
-  "${temp_dir}"/chroot/usr/lib/ubuntu-release-upgrader/check-new-release-gtk
+  "${chroot_dir}"/etc/default/apport \
+  "${chroot_dir}"/usr/lib/update-notifier/apt-check \
+  "${chroot_dir}"/usr/lib/ubuntu-release-upgrader/check-new-release \
+  "${chroot_dir}"/usr/lib/ubuntu-release-upgrader/check-new-release-gtk
 
 progress "Squashing a filesystem tree (mksquashfs)"
 umount --verbose \
-  "${temp_dir}"/chroot/proc \
-  "${temp_dir}"/chroot/sys
+  "${chroot_dir}"/proc \
+  "${chroot_dir}"/sys
 mksquashfs \
-  "${temp_dir}"/chroot/ \
-  "${temp_dir}"/image/casper/filesystem.squashfs \
+  "${chroot_dir}"/ \
+  "${image_dir}"/casper/filesystem.squashfs \
   ${MKSQUSHFS_OPTS} \
   -e boot/
 
@@ -205,21 +207,21 @@ for i in \
   vmlinuz
 do
   cp --verbose \
-    "${temp_dir}"/chroot/boot/${i}-* \
-    "${temp_dir}"/image/casper/${i}
+    "${chroot_dir}"/boot/${i}-* \
+    "${image_dir}"/casper/${i}
 done
 
 progress "Preparing isolinux loader for Ubuntu LiveCD tree"
 for f in \
-  "${script_dir}"/isolinux/isolinux.bin \
-  "${script_dir}"/isolinux/ldlinux.c32
+  "${my_dir}"/isolinux/isolinux.bin \
+  "${my_dir}"/isolinux/ldlinux.c32
 do
   cp --verbose \
     "${f}" \
-    "${temp_dir}"/image/isolinux
+    "${image_dir}"/isolinux
 done
 cat \
-> "${temp_dir}"/image/isolinux/isolinux.cfg \
+> "${image_dir}"/isolinux/isolinux.cfg \
 <<EOF
 DEFAULT live
 LABEL live
@@ -239,7 +241,7 @@ mkisofs \
   -no-emul-boot \
   -output "${UBUNTU_ISO_PATH}" \
   -rational-rock \
-  "${temp_dir}"/image
+  "${image_dir}"
 
 progress "Remove a temporary directory"
 rm --recursive \
