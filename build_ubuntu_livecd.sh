@@ -12,11 +12,12 @@ UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
 UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram}"
 
-set -o errexit
-
 my_dependencies=("cat" "cp" "debootstrap" "mkisofs" "mksquashfs" "mktemp" "rm" "touch" "umount")
 my_name="${0}"
 my_dir="${my_name%/*}"
+my_files_dir="${my_dir}/${my_name%.*}_files"
+
+set -o errexit
 
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
 then
@@ -99,8 +100,8 @@ check_commands \
 
 progress "Checking required files"
 for f in \
-  "${my_dir}"/isolinux/isolinux.bin \
-  "${my_dir}"/isolinux/ldlinux.c32
+  "${my_files_dir}"/isolinux/isolinux.bin \
+  "${my_files_dir}"/isolinux/ldlinux.c32
 do
   if [ ! -s "${f}" ]
   then
@@ -176,8 +177,8 @@ done
 
 progress "Preparing isolinux loader for Ubuntu LiveCD tree"
 for f in \
-  "${my_dir}"/isolinux/isolinux.bin \
-  "${my_dir}"/isolinux/ldlinux.c32
+  "${my_files_dir}"/isolinux/isolinux.bin \
+  "${my_files_dir}"/isolinux/ldlinux.c32
 do
   cp --verbose \
     "${f}" \
