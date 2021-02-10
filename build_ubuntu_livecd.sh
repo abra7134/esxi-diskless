@@ -10,7 +10,7 @@ UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
 UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v1.iso}"
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
-UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram vga=792}"
+UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram}"
 
 set -o errexit
 
