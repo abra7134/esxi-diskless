@@ -74,7 +74,7 @@ trap "internal cleanup_before_exit;" ERR
 trap "trap_sigint;" SIGINT
 
 echo "Script for build Ubuntu LiveCD v${MY_VERSION}"
-echo "suite:\"${UBUNTU_SUITE}\" arch:\"${UBUNTU_ARCH}\" output_iso_path:\"${UBUNTU_ISO_PATH}\""
+echo "suite=\"${UBUNTU_SUITE}\" arch=\"${UBUNTU_ARCH}\" output_iso_path=\"${UBUNTU_ISO_PATH}\""
 echo
 
 if [ -n "${1}" ]
@@ -135,14 +135,15 @@ debootstrap \
 
 unmount_fs_from_chroot
 
-progress "Optimize a filesystem tree before a squashing"
+progress "Cleanup an unnecessary files before a squashing (rm)"
 rm --recursive \
   "${chroot_dir}"/usr/share/man/?? \
   "${chroot_dir}"/usr/share/man/??_* \
   "${chroot_dir}"/usr/share/locale/* \
   "${chroot_dir}"/var/cache/apt/archives/*.deb \
   "${chroot_dir}"/var/lib/apt/lists/*
-# Create these directories and files to reduce errors on boot
+
+progress "Create empty directories and files to reduce 'casper' errors on boot (mkdir)"
 mkdir --verbose \
   --parents \
   "${chroot_dir}"/usr/lib/update-notifier \
