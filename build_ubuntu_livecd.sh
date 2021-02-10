@@ -14,7 +14,10 @@ UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram vga=792}"
 
 set -o errexit
 
-my_dir="${0%/*}"
+my_dependencies=("cat" "cp" "debootstrap" "mkisofs" "mksquashfs" "mktemp" "rm" "touch" "umount")
+my_name="${0}"
+my_dir="${my_name%/*}"
+
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
 then
   echo "!!! ERROR: Can't load a functions file (functions.sh.inc)"
@@ -28,19 +31,25 @@ echo "Script for build Ubuntu LiveCD v${MY_VERSION}"
 echo "suite:\"${UBUNTU_SUITE}\" arch:\"${UBUNTU_ARCH}\" output_iso_path:\"${UBUNTU_ISO_PATH}\""
 echo
 
+if [ -n "${1}" ]
+then
+  echo "Usage:"
+  echo "  ${my_name}"
+  echo
+  echo "Dependencies for this script:"
+  echo "  ${my_dependencies[*]}"
+  exit 0
+fi
+
 if [ -s "${UBUNTU_ISO_PATH}" ]
 then
   error "The resulted ISO file '${UBUNTU_ISO_PATH}' is already exists" \
         "Please remove it and start this script again"
 fi
 
-progress "Checking requirements"
+progress "Checking dependencies"
 check_commands \
-  cat \
-  debootstrap \
-  mkisofs \
-  mksquashfs \
-  mktemp \
+  "${my_dependencies[@]}"
 
 progress "Checking required files"
 for f in \
