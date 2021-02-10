@@ -10,7 +10,7 @@ UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
 UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v1.iso}"
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
-UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram}"
+UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram net.ifnames=0 biosdevname=0}"
 
 my_dependencies=("cat" "cp" "debootstrap" "mkisofs" "mksquashfs" "mktemp" "rm" "touch" "umount")
 my_name="${0}"
