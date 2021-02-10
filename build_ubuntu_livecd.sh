@@ -12,10 +12,11 @@ UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
 UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram net.ifnames=0 biosdevname=0}"
 
-my_dependencies=("cat" "cp" "debootstrap" "mkisofs" "mksquashfs" "mktemp" "rm" "touch" "umount")
-my_name="${0}"
-my_dir="${my_name%/*}"
+my_dependencies=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mksquashfs" "mktemp" "rm" "touch" "umount")
+my_name="${0##*/}"
+my_dir="${0%/*}"
 my_files_dir="${my_dir}/${my_name%.*}_files"
+my_provision_dir="${my_files_dir}/provision_files"
 
 set -o errexit
 
@@ -39,7 +40,7 @@ function unmount_fs_from_chroot {
       then
         fs_name="${i%%/*}"
         fs_path="${chroot_dir}/${fs_name}"
-        progress "Unmount an unnecessary pseudo filesystem '/${fs_name}' from chroot"
+        progress "Unmount a pseudo filesystem '/${fs_name}' from chroot"
         umount --verbose \
           "${fs_path}" \
         || internal "Don't unmount a filesystem '${fs_path}', please do it manually"
@@ -133,6 +134,55 @@ debootstrap \
   "${UBUNTU_SUITE}" \
   "${chroot_dir}" \
   http://archive.ubuntu.com/ubuntu
+
+if [ ! -d "${my_provision_dir}" ]
+then
+  info \
+    "The directory '${my_provision_dir}' is not exists" \
+    "Provisioning skipped ..."
+else
+  progress "Provisioning a filesystem tree"
+  for src_file_path in \
+    "${my_provision_dir}"/*
+  do
+    # ${my_provision_dir}/etc__default__locale.gen -> etc__default__locale.gen
+    src_file_name="${src_file_path##*/}"
+    # etc__default__locale.gen -> ${chroot}/etc/default/locale.gen
+    dst_file_path="${chroot_dir}/${src_file_name//__//}"
+    # ${chroot}/etc/default/locale.gen -> ${chroot}/etc/default
+    dst_file_dir="${dst_file_path%/*}"
+    # ${chroot}/etc/default/locale.gen -> locale.gen
+    dst_file_name="${dst_file_path##*/}"
+    # locale.gen -> gen
+    dst_file_ext="${dst_file_name##*.}"
+
+    mkdir --parents \
+      "${dst_file_dir}"
+    cp --verbose \
+      "${src_file_path}" \
+      "${dst_file_path}"
+
+    case "${dst_file_ext}"
+    in
+      "service" )
+        chroot "${chroot_dir}" \
+          /bin/systemctl \
+            enable \
+            "${dst_file_name}"
+        ;;
+      "sh" )
+        chmod --verbose \
+          +x \
+          "${dst_file_path}"
+        ;;
+      "authorized_keys" )
+        chmod --verbose \
+          600 \
+          "${dst_file_path}"
+        ;;
+    esac
+  done
+fi
 
 unmount_fs_from_chroot
 
