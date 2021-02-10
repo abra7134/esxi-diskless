@@ -127,7 +127,7 @@ mkdir --verbose \
 progress "Bootstrapping an Ubuntu LiveCD filesystem tree (debootstrap)"
 debootstrap \
   --arch="${UBUNTU_ARCH}" \
-  --include=apt-utils,casper,console-setup,ifupdown,linux-virtual,resolvconf \
+  --include=apt-utils,casper,console-setup,ifupdown,linux-virtual,open-vm-tools,resolvconf \
   --variant=minbase \
   "${UBUNTU_SUITE}" \
   "${chroot_dir}" \
