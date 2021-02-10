@@ -25,7 +25,53 @@ then
   exit 1
 fi
 
-trap internal ERR
+# The function for unmount a pseudo fs from chroot left after 'debootstrap' operation
+function unmount_fs_from_chroot {
+  if [ -d "${chroot_dir}" ]
+  then
+    local i fs_path fs_name
+    for i in \
+      proc/loadavg \
+      sys/power/state
+    do
+      if [ -f "${chroot_dir}/${i}" ]
+      then
+        fs_name="${i%%/*}"
+        fs_path="${chroot_dir}/${fs_name}"
+        progress "Unmount an unnecessary pseudo filesystem '/${fs_name}' from chroot"
+        umount --verbose \
+          "${fs_path}" \
+        || internal "Don't unmount a filesystem '${fs_path}', please do it manually"
+      fi
+    done
+  fi
+}
+
+# The function for remove a temporary directory
+function remove_temp_dir {
+  if [ -d "${temp_dir}" ]
+  then
+    progress "Remove a temporary directory"
+    rm --recursive \
+      "${temp_dir}" \
+    || internal "Don't remove a temporary directory, please do it manually"
+  fi
+}
+
+# The function for cleanup before exit
+function cleanup_before_exit {
+  unmount_fs_from_chroot
+  remove_temp_dir
+}
+
+# Trap function for SIGINT
+function trap_sigint {
+  cleanup_before_exit
+  warning "Interrupted"
+}
+
+trap "internal cleanup_before_exit;" ERR
+trap "trap_sigint;" SIGINT
 
 echo "Script for build Ubuntu LiveCD v${MY_VERSION}"
 echo "suite:\"${UBUNTU_SUITE}\" arch:\"${UBUNTU_ARCH}\" output_iso_path:\"${UBUNTU_ISO_PATH}\""
@@ -87,6 +133,8 @@ debootstrap \
   "${chroot_dir}" \
   http://archive.ubuntu.com/ubuntu
 
+unmount_fs_from_chroot
+
 progress "Optimize a filesystem tree before a squashing"
 rm --recursive \
   "${chroot_dir}"/usr/share/man/?? \
@@ -108,9 +156,6 @@ touch \
   "${chroot_dir}"/usr/lib/ubuntu-release-upgrader/check-new-release-gtk
 
 progress "Squashing a filesystem tree (mksquashfs)"
-umount --verbose \
-  "${chroot_dir}"/proc \
-  "${chroot_dir}"/sys
 mksquashfs \
   "${chroot_dir}"/ \
   "${image_dir}"/casper/filesystem.squashfs \
@@ -160,7 +205,6 @@ mkisofs \
   -rational-rock \
   "${image_dir}"
 
-progress "Remove a temporary directory"
-rm --recursive \
-  "${temp_dir}"
+remove_temp_dir
+
 info "Done"
