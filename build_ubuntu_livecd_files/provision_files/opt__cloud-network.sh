@@ -52,16 +52,18 @@ ETH0_NETMASK="255.255.255.$((0x${5}))"
 ETH0_GATEWAY="$((0x${1})).$((0x${2})).$((0x${3})).$((0x${6}))"
 
 echo "-> IP: ${ETH0_IP} NETMASK: ${ETH0_NETMASK} GATEWAY: ${ETH0_GATEWAY}"
-echo "Write /etc/network/interfaces.d/eth0 configuration file"
+echo "Write /etc/network/interfaces configuration file"
 
 cat \
-> /etc/network/interfaces.d/eth0 \
+> /etc/network/interfaces \
 <<EOF
-# The eth0 network interface
+# interfaces(5) file used by ifup(8) and ifdown(8)
+auto lo
+iface lo inet loopback
+
 auto eth0
-allow-hotplug eth0
 iface eth0 inet static
-    address ${ETH0_IP}
-    netmask ${ETH0_NETMASK}
-    gateway ${ETH0_GATEWAY}
+address ${ETH0_IP}
+netmask ${ETH0_NETMASK}
+gateway ${ETH0_GATEWAY}
 EOF
