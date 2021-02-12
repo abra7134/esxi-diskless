@@ -22,4 +22,3 @@
 |UBUNTU_SUITE|xenial|Версия Ubuntu Linux|
 |UBUNTU_ISO_PATH|ubuntu-xenial-amd64-live-v1.iso|Путь до результирующего iso образа|
 |UBUNTU_ROOT_PASSWORD|examplePassword789|Пароль пользователя 'root'|
-|UBUNTU_RUN_OPTIONS|textonly toram vga=792|Загрузочные опции|
