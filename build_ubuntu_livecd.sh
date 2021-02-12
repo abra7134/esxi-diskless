@@ -147,20 +147,34 @@ else
   do
     # ${my_provision_dir}/etc__default__locale.gen -> etc__default__locale.gen
     src_file_name="${src_file_path##*/}"
-    # etc__default__locale.gen -> ${chroot}/etc/default/locale.gen
+    # etc__default__locale.gen -> ${chroot_dir}/etc/default/locale.gen
     dst_file_path="${chroot_dir}/${src_file_name//__//}"
-    # ${chroot}/etc/default/locale.gen -> ${chroot}/etc/default
+    # ${chroot_dir}/etc/default/locale.gen -> ${chroot_dir}/etc/default
     dst_file_dir="${dst_file_path%/*}"
-    # ${chroot}/etc/default/locale.gen -> locale.gen
+    # ${chroot_dir}/etc/default/locale.gen -> locale.gen
     dst_file_name="${dst_file_path##*/}"
     # locale.gen -> gen
     dst_file_ext="${dst_file_name##*.}"
 
-    mkdir --parents \
-      "${dst_file_dir}"
-    cp --verbose \
-      "${src_file_path}" \
-      "${dst_file_path}"
+    case "${dst_file_ext}"
+    in
+      "patch" )
+        patch -p0 \
+          "${dst_file_path%.patch}" \
+          "${src_file_path}"
+        ;;
+      "delete" )
+        rm -v \
+          "${dst_file_path}"
+        ;;
+      * )
+        mkdir --parents \
+          "${dst_file_dir}"
+        cp --verbose \
+          "${src_file_path}" \
+          "${dst_file_path}"
+        ;;
+    esac
 
     case "${dst_file_ext}"
     in
