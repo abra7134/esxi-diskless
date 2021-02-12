@@ -3,10 +3,10 @@
 # Script for build Ubuntu LiveCD
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_VERSION="0.1"
+MY_VERSION="1.210212"
 UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
-UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v1.iso}"
+UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v${MY_VERSION}.iso}"
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
 UBUNTU_ROOT_PASSWORD="${UBUNTU_ROOT_PASSWORD:-examplePassword789}"
 
