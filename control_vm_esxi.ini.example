@@ -1,0 +1,47 @@
+# Main configuration file with list and options for all ESXi and VM instances
+#
+# The future example format (will be discussed):
+#
+# [default_opts]
+# vm_guest_type="debian8_64"
+#
+# [esxi_list]
+# esxi1 hostname="X.X.X.X"
+# esxi2
+# esxi3
+#
+# [vm_list]
+# vm1 at="esxi1" iso_path="ubuntu-xenial-amd64-live-v1.iso" ipv4_address="X.X.X.X" ipv4_netmask="X.X.X.X" ipv4_gateway="X.X.X.X" password=""
+#
+
+declare -A default_opts
+default_opts=(
+  [vm_guest_type]="debian8_64"
+)
+
+declare -A esxi_list
+esxi_list=(
+  [esxi1]=""
+)
+
+declare -A esxi_esx20_params
+esxi_esxi1_params=(
+  [datastore]="datastore1"
+  [hostname]="X.X.X.X"
+  [password]=""
+)
+
+declare -A vm_list
+vm_list=(
+  [vm1]=""
+)
+
+declare -A vm_vm2_params
+vm_vm2_params=(
+  [at]="esxi1"
+  [iso_path]="ubuntu-xenial-amd64-live-v1.210210.iso"
+  [ipv4_address]="X.X.X.X"
+  [ipv4_netmask]="X.X.X.X"
+  [ipv4_gateway]="X.X.X.X"
+  [password]=""
+)
