@@ -20,7 +20,11 @@ function _print {
     "progress" )
       local progress_message
       for progress_message in "${@}"; do
-        printf -- "--> %i. %s ...\n" $((_progress_number)) "${progress_message}"
+        printf -- "--> (%dm%ds) %i. %s ...\n" \
+          $((SECONDS/60)) \
+          $((SECONDS%60)) \
+          $((_progress_number)) \
+          "${progress_message}"
         let _progress_number+=1
       done
       ;;
