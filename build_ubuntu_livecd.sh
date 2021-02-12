@@ -12,7 +12,7 @@ UBUNTU_ROOT_PASSWORD="${UBUNTU_ROOT_PASSWORD:-examplePassword789}"
 
 MKISOFS_OPTS="-input-charset utf-8 -volid ubuntu"
 MKSQUSHFS_OPTS="-no-xattrs"
-UBUNTU_RUN_OPTIONS="textonly toram net.ifnames=0 biosdevname=0 file=preseed.cfg"
+UBUNTU_RUN_OPTIONS="textonly toram net.ifnames=0 biosdevname=0"
 
 my_dependencies=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mkpasswd" "mksquashfs" "mktemp" "rm" "sed" "touch" "umount")
 my_name="${0##*/}"
