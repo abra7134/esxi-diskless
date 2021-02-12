@@ -4,15 +4,17 @@
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
 MY_VERSION="0.1"
-MKISOFS_OPTS="-input-charset utf-8 -volid ubuntu"
-MKSQUSHFS_OPTS="-no-xattrs"
 UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
 UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v1.iso}"
 # All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
-UBUNTU_RUN_OPTIONS="${UBUNTU_RUN_OPTIONS:-textonly toram net.ifnames=0 biosdevname=0}"
+UBUNTU_ROOT_PASSWORD="${UBUNTU_ROOT_PASSWORD:-examplePassword789}"
 
-my_dependencies=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mksquashfs" "mktemp" "rm" "touch" "umount")
+MKISOFS_OPTS="-input-charset utf-8 -volid ubuntu"
+MKSQUSHFS_OPTS="-no-xattrs"
+UBUNTU_RUN_OPTIONS="textonly toram net.ifnames=0 biosdevname=0 file=preseed.cfg"
+
+my_dependencies=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mkpasswd" "mksquashfs" "mktemp" "rm" "sed" "touch" "umount")
 my_name="${0##*/}"
 my_dir="${0%/*}"
 my_files_dir="${my_dir}/${my_name%.*}_files"
@@ -199,6 +201,16 @@ else
 fi
 
 unmount_fs_from_chroot
+
+progress "Update a ROOT password (mkpasswd & sed)"
+root_password_encrypted=$(
+  mkpasswd \
+    -m sha-512 \
+    "${UBUNTU_ROOT_PASSWORD}"
+)
+sed --in-place \
+  "/^root:/s|\*|${root_password_encrypted}|" \
+  "${chroot_dir}"/etc/shadow
 
 progress "Cleanup an unnecessary files before a squashing (rm)"
 rm --recursive \
