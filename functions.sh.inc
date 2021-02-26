@@ -1,7 +1,7 @@
 let _progress_number=1
 
 # Added dependencies from this include file
-my_dependencies+=("tty")
+MY_DEPENDENCIES+=("tty")
 
 function _print {
   local print_type="${1}"
@@ -95,27 +95,91 @@ function internal {
 }
 
 function check_commands {
+  local operation="${1}"
+  if [   "${operation}" != "print" \
+      -a "${operation}" != "check" ]
+  then
+    internal "The first operand must be 'print' or 'check', but not '${operation}'"
+  fi
+  shift
+
+  if [ "${operation}" = "print" ]
+  then
+    echo "Dependencies for this script:"
+    echo -n "  "
+  fi
+
   while [ -n "${1}" ]
   do
     local required_command="${1}"
-    if ! type -P "${required_command}" >/dev/null
+    if type -P "${required_command}" >/dev/null
     then
-      error \
-        "The required command '${required_command}' is not exist" \
-        "Please check your PATH environment variable" \
-        "And install a required command through your package manager"
+      if [ "${operation}" = "print" ]
+      then
+        echo -en "${COLOR_GREEN}+${COLOR_NORMAL}${required_command} "
+      fi
+    else
+      if [ "${operation}" = "print" ]
+      then
+        echo -en "${COLOR_RED}-${COLOR_NORMAL}${required_command} "
+      else
+        error \
+          "The required command '${required_command}' is not exist" \
+          "Please check your PATH environment variable" \
+          "And install a required command through your package manager"
+      fi
     fi
     shift
   done
 }
 
 function check_root_run {
+  progress "Checking by runned root user"
   if [ ${EUID} -gt 0 ]
   then
     error \
       "For properly run this script, it's should be runned by ROOT user only" \
       "You can use 'sudo' command for this"
   fi
+}
+
+function check_dependencies {
+  progress "Checking dependencies"
+  check_commands \
+    check \
+    "${MY_DEPENDENCIES[@]}"
+}
+
+function command_help {
+  if [ "${1}" = "description" ]
+  then
+    echo "Print this help"
+    return 0
+  fi
+
+  if [ -n "${MY_LIMITATIONS}" ]
+  then
+    info "${MY_LIMITATIONS}"
+  fi
+
+  echo "Usage:"
+  echo "  ${my_name} COMMAND [OPTIONS]"
+  echo
+  echo "Commands:"
+  local function_name
+  for function_name in $(compgen -A function)
+  do
+    if [[ "${function_name}" =~ ^command_ ]]
+    then
+      printf "  %-10s %s\n" "${function_name#command_}" "$(${function_name} description)"
+    fi
+  done
+  echo
+  check_commands \
+    print \
+    "${MY_DEPENDENCIES[@]}"
+  echo
+  exit 0
 }
 
 function init_colors {
@@ -130,4 +194,17 @@ function init_colors {
     UNDERLINE="\033[4m"
     NORMAL="\033[0m"
   fi
+}
+
+function run_command {
+  command_name="${1:-help}"
+  if ! declare -F "command_${command_name}" >/dev/null
+  then
+    error "Command '${command_name}' is not exists, please run '${my_name} help' or just '${my_name}' command"
+  fi
+
+  shift || true
+  command_${command_name} "${@}"
+
+  info "Done"
 }

@@ -6,8 +6,11 @@
 # ATTENTION: This is ALPHA version, refactoring is coming soon :)
 
 MY_VERSION="0.1alpha"
+MY_DEPENDENCIES=("ssh" "sshpass" "ping")
 
+my_name="${0}"
 my_dir="${0%/*}"
+
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
 then
   echo "!!! ERROR: Can't load a functions file (functions.sh.inc)"
@@ -80,11 +83,7 @@ function command_create {
 
   info "Will create a '${vm_id}' on '${vm_at}' (${esxi_hostname})"
 
-  progress "Checking requirements"
-  check_commands \
-     ssh \
-     sshpass \
-     ping
+  check_dependencies
 
   progress "Checking the network availability of the hypervisor (ping)"
   ping \
@@ -487,37 +486,15 @@ function command_ls {
         fi
       done
   done
-}
-
-function command_help {
-  if [ "${1}" = "description" ]
-  then
-    echo "Print this help"
-    return 0
-  fi
-
-  echo "Usage:"
-  echo "  ${my_name} COMMAND [OPTIONS]"
-  echo
-  echo "Commands:"
-  local function_name
-  for function_name in $(compgen -A function)
-  do
-    if [[ "${function_name}" =~ ^command_ ]]
-    then
-      printf "  %-10s %s\n" "${function_name#command_}" "$(${function_name} description)"
-    fi
-  done
-  echo
-  echo "Requirements for this script:"
-  echo "  ssh, sshpass, ping"
   exit 0
 }
 
-echo "Script for simply control of virtual machines on ESXi v${MY_VERSION}"
-echo
+init_colors
 
-my_name="${0}"
+echo -en "${COLOR_NORMAL}${UNDERLINE}"
+echo -n "Script for simply control of virtual machines on ESXi v${MY_VERSION}"
+echo -e "${COLOR_NORMAL}"
+echo
 
 # !!! FIXME: Need to be replaced to a full parser with strict syntax checking
 if ! source "${my_dir}/${my_name%.sh}.ini" 2>/dev/null
@@ -527,11 +504,4 @@ then
     "Please check of it existance and try again"
 fi
 
-command_name="${1:-help}"
-if ! declare -F "command_${command_name}" >/dev/null
-then
-  error "Command '${command_name}' is not exists, please run '${my_name} help' or just '${my_name}' command"
-fi
-
-shift || true
-command_${command_name} "${@}"
+run_command "${@}"
