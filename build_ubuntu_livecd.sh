@@ -4,14 +4,15 @@
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
 MY_VERSION="1.210212"
+
 UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
-UBUNTU_ISO_PATH="${UBUNTU_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v${MY_VERSION}.iso}"
-# All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
 UBUNTU_ROOT_PASSWORD="${UBUNTU_ROOT_PASSWORD:-examplePassword789}"
+UBUNTU_OUTPUT_ISO_PATH="${UBUNTU_OUTPUT_ISO_PATH:-ubuntu-${UBUNTU_SUITE}-${UBUNTU_ARCH}-live-v${MY_VERSION}.iso}"
 
 MKISOFS_OPTS="-input-charset utf-8 -volid ubuntu"
 MKSQUSHFS_OPTS="-no-xattrs"
+# All run options see at http://manpages.ubuntu.com/manpages/xenial/man7/casper.7.html
 UBUNTU_RUN_OPTIONS="textonly toram net.ifnames=0 biosdevname=0"
 
 my_dependencies=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mkpasswd" "mksquashfs" "mktemp" "rm" "sed" "touch" "umount")
@@ -78,7 +79,7 @@ trap "internal cleanup_before_exit;" ERR
 trap "trap_sigint;" SIGINT
 
 echo "Script for build Ubuntu LiveCD v${MY_VERSION}"
-echo "suite=\"${UBUNTU_SUITE}\" arch=\"${UBUNTU_ARCH}\" output_iso_path=\"${UBUNTU_ISO_PATH}\""
+echo "suite=\"${UBUNTU_SUITE}\" arch=\"${UBUNTU_ARCH}\" output_iso_path=\"${UBUNTU_OUTPUT_ISO_PATH}\""
 echo
 
 if [ -n "${1}" ]
@@ -91,9 +92,9 @@ then
   exit 0
 fi
 
-if [ -s "${UBUNTU_ISO_PATH}" ]
+if [ -s "${UBUNTU_OUTPUT_ISO_PATH}" ]
 then
-  error "The resulted ISO file '${UBUNTU_ISO_PATH}' is already exists" \
+  error "The resulted ISO file '${UBUNTU_OUTPUT_ISO_PATH}' is already exists" \
         "Please remove it and start this script again"
 fi
 
@@ -279,7 +280,7 @@ mkisofs \
   -eltorito-catalog isolinux/boot.cat \
   -joliet \
   -no-emul-boot \
-  -output "${UBUNTU_ISO_PATH}" \
+  -output "${UBUNTU_OUTPUT_ISO_PATH}" \
   -rational-rock \
   "${image_dir}"
 
