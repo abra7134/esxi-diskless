@@ -16,9 +16,10 @@ MKSQUSHFS_OPTS="-no-xattrs"
 UBUNTU_RUN_OPTIONS="textonly toram net.ifnames=0 biosdevname=0"
 
 my_dependencies=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mkpasswd" "mksquashfs" "mktemp" "rm" "sed" "touch" "umount")
-my_name="${0##*/}"
+my_name="${0}"
 my_dir="${0%/*}"
-my_files_dir="${my_dir}/${my_name%.*}_files"
+my_file="${0##*/}"
+my_files_dir="${my_dir}/${my_file%.*}_files"
 my_provision_dir="${my_files_dir}/provision_files"
 
 set -o errexit
@@ -78,8 +79,21 @@ function trap_sigint {
 trap "internal cleanup_before_exit;" ERR
 trap "trap_sigint;" SIGINT
 
-echo "Script for build Ubuntu LiveCD v${MY_VERSION}"
-echo "suite=\"${UBUNTU_SUITE}\" arch=\"${UBUNTU_ARCH}\" output_iso_path=\"${UBUNTU_OUTPUT_ISO_PATH}\""
+init_colors
+
+echo -en "${COLOR_NORMAL}${UNDERLINE}"
+echo -n "Script for build Ubuntu LiveCD v${MY_VERSION}"
+echo -e "${NORMAL}"
+# The color print of some important variables
+for o in \
+  suite \
+  arch \
+  output_iso_path \
+  root_password
+do
+  eval echo -en \"\${o}=\\\"\${COLOR_WHITE}\${UBUNTU_${o^^}}\${COLOR_NORMAL}\\\" \"
+done
+echo -e "${NORMAL}"
 echo
 
 if [ -n "${1}" ]

@@ -1,5 +1,8 @@
 let _progress_number=1
 
+# Added dependencies from this include file
+my_dependencies+=("tty")
+
 function _print {
   local print_type="${1}"
   shift
@@ -13,14 +16,14 @@ function _print {
     "info" )
       local info_message
       for info_message in "${@}"; do
-        printf -- "!!! ${info_message}\n"
+        printf -- "${COLOR_WHITE}!!! ${info_message}${COLOR_NORMAL}\n"
       done
       echo
       ;;
     "progress" )
       local progress_message
       for progress_message in "${@}"; do
-        printf -- "--> (%dm%ds) %i. %s ...\n" \
+        printf -- "${COLOR_NORMAL}--> (%dm%ds) %i. %s ...${COLOR_GRAY}\n" \
           $((SECONDS/60)) \
           $((SECONDS%60)) \
           $((_progress_number)) \
@@ -32,11 +35,12 @@ function _print {
       {
         local ident="!!! ${print_type^^}:"
         local ident_length="${#ident}"
+        local error_message="${1}"
         echo
-        local error_message
+        printf -- "${COLOR_RED}%s${COLOR_NORMAL} %s\n" "${ident}" "${error_message}"
+        shift
         for error_message in "${@}"; do
-          printf -- "%-${ident_length}s %s\n" "${ident}" "${error_message}"
-          ident=""
+          printf -- "%-${ident_length}s %s\n" "" "${error_message}"
         done
         echo
       } >&2
@@ -111,5 +115,19 @@ function check_root_run {
     error \
       "For properly run this script, it's should be runned by ROOT user only" \
       "You can use 'sudo' command for this"
+  fi
+}
+
+function init_colors {
+  # This simply check tty or not is used
+  if tty --silent
+  then
+    COLOR_GRAY="\e[1;30m"
+    COLOR_GREEN="\e[1;32m"
+    COLOR_NORMAL="\e[0m"
+    COLOR_RED="\e[1;31m"
+    COLOR_WHITE="\e[1;37m"
+    UNDERLINE="\033[4m"
+    NORMAL="\033[0m"
   fi
 }
