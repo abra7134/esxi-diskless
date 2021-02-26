@@ -197,6 +197,23 @@ function init_colors {
 }
 
 function run_command {
+  init_colors
+
+  echo -en "${COLOR_NORMAL}${UNDERLINE}"
+  echo -n "${MY_NAME} v${MY_VERSION}"
+  echo -e "${COLOR_NORMAL}"
+  echo
+
+  echo "Environment variables:"
+  local my_variable
+  for v in \
+    "${MY_VARIABLES[@]}"
+  do
+    eval my_variable=\"\${${v}}\"
+    echo -e "  ${v}=\"${COLOR_WHITE}${my_variable}${COLOR_NORMAL}\""
+  done
+  echo
+
   command_name="${1:-help}"
   if ! declare -F "command_${command_name}" >/dev/null
   then

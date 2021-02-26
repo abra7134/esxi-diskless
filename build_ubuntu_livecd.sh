@@ -3,9 +3,11 @@
 # Script for build Ubuntu LiveCD
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_VERSION="1.210212"
 MY_DEPENDENCIES=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mkpasswd" "mksquashfs" "mktemp" "rm" "sed" "touch" "umount")
 MY_LIMITATIONS="This script must be run under the ROOT user"
+MY_NAME="Script for build Ubuntu LiveCD"
+MY_VARIABLES=("UBUNTU_ARCH" "UBUNTU_SUITE" "UBUNTU_OUTPUT_ISO_PATH" "UBUNTU_ROOT_PASSWORD")
+MY_VERSION="1.210212"
 
 UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
@@ -278,22 +280,5 @@ function trap_sigint {
 
 trap "internal cleanup_before_exit;" ERR
 trap "trap_sigint;" SIGINT
-
-init_colors
-
-echo -en "${COLOR_NORMAL}${UNDERLINE}"
-echo -n "Script for build Ubuntu LiveCD v${MY_VERSION}"
-echo -e "${NORMAL}"
-# The color print of some important variables
-for o in \
-  suite \
-  arch \
-  output_iso_path \
-  root_password
-do
-  eval echo -en \"\${o}=\\\"\${COLOR_WHITE}\${UBUNTU_${o^^}}\${COLOR_NORMAL}\\\" \"
-done
-echo -e "${NORMAL}"
-echo
 
 run_command "${@}"

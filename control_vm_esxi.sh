@@ -5,8 +5,12 @@
 
 # ATTENTION: This is ALPHA version, refactoring is coming soon :)
 
-MY_VERSION="0.1alpha"
 MY_DEPENDENCIES=("ssh" "sshpass" "ping")
+MY_NAME="Script for simply control of virtual machines on ESXi"
+MY_VARIABLES=("ESXI_CONFIG_PATH")
+MY_VERSION="0.1alpha"
+
+ESXI_CONFIG_PATH="${CONFIG_PATH:-"${0%.sh}.ini"}"
 
 my_name="${0}"
 my_dir="${0%/*}"
@@ -489,12 +493,7 @@ function command_ls {
   exit 0
 }
 
-init_colors
 
-echo -en "${COLOR_NORMAL}${UNDERLINE}"
-echo -n "Script for simply control of virtual machines on ESXi v${MY_VERSION}"
-echo -e "${COLOR_NORMAL}"
-echo
 
 # !!! FIXME: Need to be replaced to a full parser with strict syntax checking
 if ! source "${my_dir}/${my_name%.sh}.ini" 2>/dev/null
