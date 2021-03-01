@@ -15,6 +15,42 @@ ESXI_CONFIG_PATH="${CONFIG_PATH:-"${0%.sh}.ini"}"
 my_name="${0}"
 my_dir="${0%/*}"
 
+my_config_parameters=(
+  "esxi_hostname"
+  "esxi_password"
+  "local_iso_path"
+  "vm_guest_type"
+  "vm_ipv4_address"
+  "vm_ipv4_netmask"
+  "vm_ipv4_gateway"
+  "vm_network"
+  "vm_password"
+)
+
+# my_all_params - associative array with all params from configuration file
+#                 the first number of the index name is the resource number, the digit "0" is reserved for default settings
+#                 other resource numbers will be referenced in "my_esxi_list" and "my_vm_list" associative arrays
+# for example:
+#
+# my_all_params=(
+#   [0.esxi_password]="password"
+#   [0.vm_guest_type]="debian8-64"
+#   [0.vm_ipv4_address]="7.7.7.7"
+#   [1.esxi_hostname]="esxi1.local"
+#   [2.vm_ipv4_address]="192.168.0.1"
+# )
+# my_esxi_list=(
+#   [1]="esxi.test"
+# )
+# my_vm_list=(
+#   [2]="vm.test.local"
+# )
+#
+declare -A \
+  my_esxi_list \
+  my_vm_list \
+  my_all_params
+
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
 then
   echo "!!! ERROR: Can't load a functions file (functions.sh.inc)"
@@ -493,14 +529,154 @@ function command_ls {
   exit 0
 }
 
+function parse_configuration_file {
+  function error_config {
+    error \
+      "Configuration file (${ESXI_CONFIG_PATH}) at line ${config_lineno}:" \
+      "> ${s}" \
+      "${@}"
+  }
 
+  if [ ! -s "${ESXI_CONFIG_PATH}" ]
+  then
+    error \
+      "Can't load a configuration file (${ESXI_CONFIG_PATH})" \
+      "Please check of it existance and try again"
+  fi
 
-# !!! FIXME: Need to be replaced to a full parser with strict syntax checking
-if ! source "${my_dir}/${my_name%.sh}.ini" 2>/dev/null
-then
-  error \
-    "Can't load a configuration file (${my_name%.sh}.ini)" \
-    "Please check of it existance and try again"
-fi
+  local \
+    config_lineno=0 \
+    config_section_name="" \
+    config_parameter="" \
+    config_parameters="" \
+    config_resource_name="" \
+    config_value="" \
+    section_name="" \
+    resource_id=0 \
+    use_previous_resource="" \
+
+  while
+    IFS=
+    read -r s
+  do
+    let config_lineno+=1
+
+    # Skip empty lines
+    if [[ "${s}" == "" ]]
+    then
+      continue
+
+    # Skip is it comment
+    elif [[ "${s}" =~ ^# ]]
+    then
+      continue
+
+    # Parse the INI-section
+    # like "[name]  # comments"
+    elif [[ "${s}" =~ ^\[([^\]]*)\] ]]
+    then
+      config_section_name="${BASH_REMATCH[1]}"
+      if [ -z "${section_name}" \
+             -a "${config_section_name}" != "defaults" ]
+      then
+        error_config \
+          "The first INI-section must be [defaults], please reorder and try again"
+      elif [ "${section_name}" = "defaults" \
+             -a "${config_section_name}" != "esxi_list" ]
+      then
+        error_config \
+          "The second INI-section must be [esxi_list], please reorder and try again"
+      elif [ "${section_name}" = "esxi_list" \
+             -a "${config_section_name}" != "vm_list" ]
+      then
+        error_config \
+          "The third INI-section must be [vm_list], please reorder and try again"
+      elif [ "${section_name}" = "vm_list" \
+             -a -n "${config_section_name}" ]
+      then
+        error_config \
+          "The configuration file must consist of only 3x INI-sections: [defaults], [esxi_list], [vm_list]" \
+          "Please remove the extra sections and try again"
+      fi
+      section_name="${config_section_name}"
+
+    # Parse INI-resources with and without parameters or just parameters without INI-resource
+    # like "resource1"
+    #   or "resource1 # comments"
+    #   or "resource1 param1="value1""
+    #   or "resource2     param2=  "value2"   #comments"
+    #   or "resource3   param3     =value3 param4  =     value4 \"
+    #   or "    param5   = value5   param6 =value6"
+    elif [[    "${s}" =~ ^([^[:blank:]#=]+)[[:blank:]]+(#.*)?$ \
+            || "${s}" =~ ^([^[:blank:]#=]+[[:blank:]])?[[:blank:]]*([^[:blank:]#=]+[[:blank:]=]+.*) ]]
+    then
+      # Getting the resource name by trimming space
+      config_resource_name="${BASH_REMATCH[1]% }"
+
+      if [ -z "${config_resource_name}" \
+           -a -z "${use_previous_resource}" \
+           -a "${section_name}" != "defaults" ]
+      then
+        error_config \
+          "INI-parameters must be formatted in [defaults] section" \
+          "Please place all parameters in the right place and try again"
+      elif [ -n "${config_resource_name}" ]
+      then
+        let resource_id+=1
+        case "${section_name}"
+        in
+          "esxi_list" )
+            my_esxi_list+=([${resource_id}]="${config_resource_name}")
+            ;;
+          "vm_list" )
+            my_vm_list+=([${resource_id}]="${config_resource_name}")
+            ;;
+          * )
+            error_config \
+              "INI-resources definitions must be formatted in [esxi_list] or [vm_list] sections" \
+              "Please place all resources definitions in the right place and try again"
+            ;;
+        esac
+      fi
+      config_parameters="${BASH_REMATCH[2]}"
+      use_previous_resource=""
+
+      # The recursive loop for parsing multiple parameters definition
+      while [[ "${config_parameters}" =~ ^[[:blank:]]*([^[:blank:]=#]*)[[:blank:]]*=[[:blank:]]*\"?([^\"]*)\"?[[:blank:]]*(.*|\\)$ ]]
+      do
+        config_parameter="${BASH_REMATCH[1]}"
+        config_value="${BASH_REMATCH[2]}"
+        config_parameters="${BASH_REMATCH[3]}"
+
+        echo "${config_parameter} = \"${config_value}\""
+
+        if [[ ! " at ${my_config_parameters[@]} " =~ " ${config_parameter} " ]]
+        then
+          error_config \
+            "The unknown INI-parameter name '${config_parameter}'" \
+            "Please correct (correct names specified at ${ESXI_CONFIG_PATH}.example) and try again"
+        elif [[ " ${!my_all_params[@]} " =~ " ${resource_id}${config_parameter} " ]]
+        then
+          error_config \
+            "The parameter '${config_parameter}' is already defined" \
+            "Please remove the already defined parameter and try again"
+        fi
+
+        my_all_params+=([${resource_id}.${config_parameter}]="${config_value}")
+
+        # If line ending with '\' symbol, associate the parameters from next line with current resource_id
+        if [ "${config_parameters}" = "\\" ]
+        then
+          use_previous_resource="yes"
+        fi
+      done
+
+    else
+      error_config \
+        "Cannot parse a string, please correct and try again"
+    fi
+  done \
+  < "${ESXI_CONFIG_PATH}"
+}
 
 run_command "${@}"
