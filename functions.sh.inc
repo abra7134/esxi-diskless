@@ -16,7 +16,7 @@ function _print {
     "info" )
       local info_message
       for info_message in "${@}"; do
-        printf -- "${COLOR_WHITE}!!! ${info_message}${COLOR_NORMAL}\n"
+        printf -- "${COLOR_YELLOW}!!! ${info_message}${COLOR_NORMAL}\n"
       done
       echo
       ;;
@@ -171,7 +171,7 @@ function command_help {
   do
     if [[ "${function_name}" =~ ^command_ ]]
     then
-      printf "  %-10s %s\n" "${function_name#command_}" "$(${function_name} description)"
+      printf "  ${COLOR_WHITE}%-10s${COLOR_NORMAL} %s\n" "${function_name#command_}" "$(${function_name} description)"
     fi
   done
   echo
@@ -191,6 +191,7 @@ function init_colors {
     COLOR_NORMAL="\e[0m"
     COLOR_RED="\e[1;31m"
     COLOR_WHITE="\e[1;37m"
+    COLOR_YELLOW="\e[1;33m"
     UNDERLINE="\033[4m"
     NORMAL="\033[0m"
   fi
