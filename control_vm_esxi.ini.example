@@ -1,47 +1,44 @@
 # Main configuration file with list and options for all ESXi and VM instances
+# format is very similar to INI with slight differences
 #
-# The future example format (will be discussed):
+# The entire configuration file consists of 3 sections: [defaults], [esxi_list], [vm_list]
 #
-# [default_opts]
-# vm_guest_type="debian8_64"
+# The [defaults] section sets default values that can be overridden for specific ESXi instances or virtual machines
+# The remaining two sections specify the lists of ESXi instances and virtual machines on them and their parameters
+#
+# For example:
+#
+# [defaults]
+# vm_guest_type = "debian8_64"    # This is comment
+# vm_netmask=255.255.255.255      # Values can also be specified without quotation marks
 #
 # [esxi_list]
-# esxi1 hostname="X.X.X.X"
-# esxi2
-# esxi3
+# esxi1                                              # Defining a resource without parameters (will be taken from default values)
+# esxi2     esxi_hostname="X.X.X.X"                  # All extra spaces are trimmed
+# esxi3  esxi_hostname="X.X.X.X" \                   # Parameters can be set on the next line if the line ends with a '\'
+#   esxi_ssh_password="password" esxi_ssh_port=5252  # Multiple options can be set on the same line
 #
 # [vm_list]
-# vm1 at="esxi1" iso_path="ubuntu-xenial-amd64-live-v1.iso" ipv4_address="X.X.X.X" ipv4_netmask="X.X.X.X" ipv4_gateway="X.X.X.X" password=""
+# vm1 at="esxi1" \                                   # 'at' parameter is required
+#   local_iso_path="ubuntu-xenial-amd64-live-v1.iso" vm_ipv4_address="X.X.X.X" \
+#     vm_ipv4_netmask="X.X.X.X" vm_ipv4_gateway="X.X.X.X"
 #
 
-declare -A default_opts
-default_opts=(
-  [vm_guest_type]="debian8_64"
-)
+[defaults]
+esxi_hostname=""
+esxi_ssh_password=""
+esxi_ssh_port=22
+esxi_ssh_username="root"
+local_iso_path=""
+vm_guest_type="debian8-64"
+vm_ipv4_address=""
+vm_ipv4_netmask="255.255.255.0"
+vm_ipv4_gateway=""
+vm_network_name="VM Network"
+vm_ssh_password=""
+vm_ssh_port=22
+vm_ssh_username="root"
 
-declare -A esxi_list
-esxi_list=(
-  [esxi1]=""
-)
+[esxi_list]
 
-declare -A esxi_esx20_params
-esxi_esxi1_params=(
-  [datastore]="datastore1"
-  [hostname]="X.X.X.X"
-  [password]=""
-)
-
-declare -A vm_list
-vm_list=(
-  [vm1]=""
-)
-
-declare -A vm_vm2_params
-vm_vm2_params=(
-  [at]="esxi1"
-  [iso_path]="ubuntu-xenial-amd64-live-v1.210210.iso"
-  [ipv4_address]="X.X.X.X"
-  [ipv4_netmask]="X.X.X.X"
-  [ipv4_gateway]="X.X.X.X"
-  [password]=""
-)
+[vm_list]
