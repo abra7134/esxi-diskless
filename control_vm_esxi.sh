@@ -120,16 +120,17 @@ function command_create {
   for param in \
     at \
     local_iso_path \
+    vm_esxi_datastore \
     vm_ipv4_address \
     vm_ipv4_netmask \
     vm_ipv4_gateway \
+    vm_network_name \
     vm_ssh_password
   do
     local ${param}
     eval ${param}=\"\${my_all_params[${vm_id}.${param}]}\"
   done
   for param in \
-    esxi_datastore \
     esxi_hostname \
     esxi_ssh_username \
     esxi_ssh_password
@@ -244,9 +245,9 @@ EOF
         ;;
   esac
 
-  local vm_dir="/vmfs/volumes/${esxi_datastore}/${vm_name}"
+  local vm_dir="/vmfs/volumes/${vm_esxi_datastore}/${vm_name}"
   local vm_iso_file="${local_iso_path##*/}"
-  local esxi_iso_dir="/vmfs/volumes/${esxi_datastore}/.iso"
+  local esxi_iso_dir="/vmfs/volumes/${vm_esxi_datastore}/.iso"
 
   progress "Checking existance the ISO image file on hypervisor (test -s)"
   sshpass \
@@ -319,7 +320,7 @@ ethernet0.bsdname = "en0"
 ethernet0.connectiontype = "nat"
 ethernet0.displayname = "Ethernet"
 ethernet0.linkstatepropagation.enable = "FALSE"
-ethernet0.networkname = "vlan"
+ethernet0.networkname = "${vm_network_name}"
 ethernet0.pcislotnumber = "33"
 ethernet0.present = "TRUE"
 ethernet0.virtualdev = "vmxnet3"
@@ -403,7 +404,7 @@ EOF
     root@"${esxi_hostname}" \
   <<EOF
 vm_name="${vm_name}"
-vm_vmx_path="/vmfs/volumes/${esxi_datastore}/${vm_name}/${vm_name}.vmx"
+vm_vmx_path="/vmfs/volumes/${vm_esxi_datastore}/${vm_name}/${vm_name}.vmx"
 
 vim-cmd \
   solo/registervm \
