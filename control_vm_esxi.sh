@@ -597,11 +597,11 @@ function command_ls {
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
           "$(print_param vm_guest_type ${vm_id})"
-        printf -- "    network=\"%s\" netmask=\"%s\" gateway=\"%s\"\n" \
+        printf -- "    network=\"%s\" gateway=\"%s\" netmask=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
-          "$(print_param vm_ipv4_netmask ${vm_id})" \
-          "$(print_param vm_ipv4_gateway ${vm_id})"
-        printf -- "    datastore=\"%s\" iso_path=\"%s\"\n" \
+          "$(print_param vm_ipv4_gateway ${vm_id})" \
+          "$(print_param vm_ipv4_netmask ${vm_id})"
+        printf -- "    datastore=\"%s\" iso_local_path=\"%s\"\n" \
           "$(print_param vm_esxi_datastore ${vm_id})" \
           "$(print_param local_iso_path ${vm_id})"
       fi
