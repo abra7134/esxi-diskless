@@ -612,56 +612,62 @@ function command_ls {
   exit 0
 }
 
-function fill_and_check_configuration {
-  local \
-    esxi_id="" \
-    param="" \
-    vm_id=""
+function parse_configuration_file {
+  function check_param_value {
+    local \
+      param="${1}" \
+      value="${2}" \
+      error=""
 
-  for param in "${!my_all_params[@]}"
-  do
     case "${param}"
     in
-      0.esxi_* )
-        for esxi_id in "${!my_esxi_list[@]}"
-        do
-          if [ ! -v my_all_params[${esxi_id}.${param#0.}] ]
-          then
-            my_all_params+=([${esxi_id}.${param#0.}]="${my_all_params[0.${param#0.}]}")
-          fi
-        done
+      "esxi_hostname" )
+        [[ "${value}" =~ ^[[:alnum:]_\.\-]+$ ]] \
+        || \
+          error="it must consist of characters (in regex notation): [[:alnum:]_.-]"
         ;;
-      0.* )
-        for vm_id in "${!my_vm_list[@]}"
-        do
-          if [ ! -v my_all_params[${vm_id}.at] ]
-          then
-            error \
-              "Problem in configuration file:" \
-              "The virtual machine '${my_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
-              "Please add the 'at' definition and try again"
-          fi
-
-          esxi_id="${my_all_params[${vm_id}.at]}"
-          if [ ! -v my_all_params[${vm_id}.${param#0.}] ]
-          then
-            if [ -v my_all_params[${esxi_id}.${param#0.}] ]
-            then
-              my_all_params+=([${vm_id}.${param#0.}]="${my_all_params[${esxi_id}.${param#0.}]}")
-            else
-              my_all_params+=([${vm_id}.${param#0.}]="${my_all_params[0.${param#0.}]}")
-            fi
-          fi
-        done
+      "esxi_ssh_port"|"vm_ssh_port" )
+        [[    "${value}" =~ ^[[:digit:]]+$ \
+           && "${value}" -ge 0 \
+           && "${value}" -le 65535 ]] \
+        || \
+          error="it must be a number from 0 to 65535"
+        ;;
+      "esxi_ssh_password"|"vm_ssh_password" )
+        ;;
+      "vm_ipv4_address"|"vm_ipv4_gateway" )
+        [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
+        || \
+          error="it must be the correct IPv4 address (in x.x.x.x format)"
+        ;;
+      "vm_ipv4_netmask" )
+        [[    "${value}" =~ ^255\.255\.255\.(255|254|252|248|240|224|192|128|0)$ \
+           || "${value}" =~ ^255\.255\.(255|254|252|248|240|224|192|128|0)\.0$ \
+           || "${value}" =~ ^255\.(255|254|252|248|240|224|192|128|0)\.0\.0$ \
+           || "${value}" =~ ^(255|254|252|248|240|224|192|128|0)\.0\.0\.0$ ]] \
+        || \
+          error="it must be the correct IPv4 netmask (in x.x.x.x format)"
+        ;;
+      * )
+        [ -n "${value}" ] \
+        || \
+          error="it must be not empty"
+        ;;
     esac
-  done
-}
 
-function parse_configuration_file {
+    if [ -n "${error}" ]
+    then
+      error_config \
+        "The wrong value of '${param}' parameter: ${error}" \
+        "Please fix it and try again"
+    fi
+  }
+
   function error_config {
     error \
       "Configuration file (${ESXI_CONFIG_PATH}) at line ${config_lineno}:" \
       "> ${s}" \
+      "" \
       "${@}"
   }
 
@@ -679,6 +685,7 @@ function parse_configuration_file {
     config_parameters="" \
     config_resource_name="" \
     config_value="" \
+    default_value="" \
     esxi_id="" \
     section_name="" \
     resource_id=0 \
@@ -686,8 +693,7 @@ function parse_configuration_file {
     use_previous_resource="" \
 
   while
-    IFS=
-    read -r s
+    IFS="" read -r s
   do
     let config_lineno+=1
 
@@ -836,6 +842,7 @@ function parse_configuration_file {
         # Don't assign a value if it equal to default value
         if [ "${my_all_params[0.${config_parameter}]}" != "${config_value}" ]
         then
+          check_param_value "${config_parameter}" "${config_value}"
           my_all_params+=([${resource_id}.${config_parameter}]="${config_value}")
         fi
 
@@ -853,7 +860,72 @@ function parse_configuration_file {
   done \
   < "${ESXI_CONFIG_PATH}"
 
-  fill_and_check_configuration
+  # Fill in all missing fields in [esxi_list] and [vm_list] sections from default values with some checks
+  for config_parameter in "${!my_all_params[@]}"
+  do
+    if [[ "${config_parameter}" =~ ^0\.(esxi_.*)$ ]]
+    then
+      # Overriden the parameter name without prefix
+      config_parameter="${BASH_REMATCH[1]}"
+      default_value="${my_all_params[0.${config_parameter}]}"
+      for esxi_id in "${!my_esxi_list[@]}"
+      do
+        if [ ! -v my_all_params[${esxi_id}.${config_parameter}] ]
+        then
+
+          if [ -z "${default_value}" \
+               -a "${config_parameter}" != "esxi_ssh_password" ]
+          then
+            error \
+              "Problem in configuration file:" \
+              "The empty value of required '${config_parameter}' parameter at '${my_esxi_list[$esxi_id]}' esxi instance definition" \
+              "Please fill the value of parameter and try again"
+          fi
+
+          my_all_params+=([${esxi_id}.${config_parameter}]="${default_value}")
+        fi
+      done
+    elif [[ "${config_parameter}" =~ ^0\.(.*)$ ]]
+    then
+      # Overriden the parameter name without prefix
+      config_parameter="${BASH_REMATCH[1]}"
+      for vm_id in "${!my_vm_list[@]}"
+      do
+        if [ ! -v my_all_params[${vm_id}.at] ]
+        then
+          error \
+            "Problem in configuration file:" \
+            "The virtual machine '${my_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
+            "Please add the 'at' definition and try again"
+        fi
+
+        esxi_id="${my_all_params[${vm_id}.at]}"
+        if [ ! -v my_all_params[${vm_id}.${config_parameter}] ]
+        then
+
+          if [ -v my_all_params[${esxi_id}.${config_parameter}] ]
+          then
+            default_value="${my_all_params[${esxi_id}.${config_parameter}]}"
+            # Remove vm parameters from esxi section
+            unset my_all_params[${esxi_id}.${config_parameter}]
+          else
+            default_value="${my_all_params[0.${config_parameter}]}"
+          fi
+
+          if [ -z "${default_value}" \
+               -a "${config_parameter}" != "vm_ssh_password" ]
+          then
+            error \
+              "Problem in configuration file:" \
+              "The empty value of required '${config_parameter}' parameter at '${my_vm_list[$vm_id]}' virtual machine definition" \
+              "Please fill the value of parameter and try again"
+          fi
+
+          my_all_params+=([${vm_id}.${config_parameter}]="${default_value}")
+        fi
+      done
+    fi
+  done
 }
 
 run_command "${@}"

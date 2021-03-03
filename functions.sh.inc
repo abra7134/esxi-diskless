@@ -224,5 +224,6 @@ function run_command {
   shift || true
   command_${command_name} "${@}"
 
+  echo
   info "Done"
 }
