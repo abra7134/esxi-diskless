@@ -30,6 +30,7 @@ esxi_ssh_password=""
 esxi_ssh_port=22
 esxi_ssh_username="root"
 local_iso_path=""
+vm_esxi_datastore="datastore1"
 vm_guest_type="debian8-64"
 vm_ipv4_address=""
 vm_ipv4_netmask="255.255.255.0"

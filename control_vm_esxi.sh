@@ -46,6 +46,7 @@ my_all_params=(
   [0.esxi_ssh_port]=22
   [0.esxi_ssh_username]="root"
   [0.local_iso_path]=""
+  [0.vm_esxi_datastore]="datastore1"
   [0.vm_guest_type]="debian8-64"
   [0.vm_ipv4_address]=""
   [0.vm_ipv4_netmask]="255.255.255.0"
@@ -499,41 +500,117 @@ EOF
 function command_ls {
   if [ "${1}" = "description" ]
   then
-    echo "List all of controlled ESXi and VM instances"
+    echo "List all of controlled ESXi and VM instances ('-n' key for ping off)"
     return 0
   fi
 
-  # !!! FIXME: need to be refactored and simplified
-  #            added a ping checking for all esxi and vms
-  local param
-  local esxi_id esxi_hostname
-  local vm_id vm_at vm_iso_path vm_ipv4_address vm_ipv4_netmask vm_ipv4_gateway vm_startorder
-  for esxi_id in ${!esxi_list[@]}
+  # Function to print parameter value in highlighted if it differs from default value
+  function print_param() {
+    local \
+      param="${1}" \
+      id="${2}"
+
+    local value="${my_all_params[${id}.${param}]}"
+    if [ "${value}" != "${my_all_params[0.${param}]}" ]
+    then
+      echo -e "${COLOR_WHITE}${value}${COLOR_NORMAL}"
+    else
+      echo "${value}"
+    fi
+  }
+
+  parse_configuration_file
+
+  if [ ${#my_esxi_list[@]} -lt 1 ]
+  then
+    warning \
+      "The ESXi list is empty in configuration file" \
+      "Please fill a configuration file and try again"
+  fi
+
+  local use_color=""
+
+  # Don't check the network availability if '-n' key is specified
+  if [ "${1}" != "-n" ]
+  then
+    info "To disable an availability checking use '-n' key"
+    progress "Check network availability all hosts (ping)"
+
+    local -A ping_list
+    local \
+      id="" \
+      hostname=""
+
+    for id in "${!my_esxi_list[@]}" "${!my_vm_list[@]}"
+    do
+      # The small hack without condition since parameters are not found in both lists at once
+      hostname="${my_all_params[${id}.esxi_hostname]}${my_all_params[${id}.vm_ipv4_address]}"
+      if \
+        ping \
+          -c 1 -w 1 \
+          "${hostname}" \
+        &>/dev/null
+      then
+        ping_list+=([${id}]="yes")
+      fi
+    done
+
+    use_color="yes"
+    progress "Completed"
+    echo
+  fi
+
+  echo -en "${COLOR_NORMAL}"
+  echo "List all of controlled ESXi and VM instances:"
+  echo
+  info "The higlighted values are overridden from default values ([defaults] section)"
+
+  local \
+    color_alive="" \
+    esxi_id="" \
+    vm_id=""
+
+  for esxi_id in "${!my_esxi_list[@]}"
   do
-      eval esxi_hostname=\"\${esxi_${esxi_id}_params[hostname]}\"
-      echo "${esxi_id} (hostname ${esxi_hostname}):"
-      for vm_id in ${!vm_list[@]}
-      do
-        for param in \
-          at \
-          iso_path \
-          ipv4_address \
-          ipv4_netmask \
-          ipv4_gateway \
-          startorder
-        do
-          eval vm_${param}=\"\${vm_${vm_id}_params[${param}]}\"
-        done
-        if [ "${vm_at}" = "${esxi_id}" ]
-        then
-          echo "  ${vm_id} - iso_path=${vm_iso_path} ipv4=${vm_ipv4_address}/${vm_ipv4_netmask} (gateway=${vm_ipv4_gateway}) startorder=${vm_startorder}"
-          vm_list[${vm_id}]="${esxi_id}"
-        fi
-      done
+    [ -v ping_list[${esxi_id}] ] \
+    && color_alive="${use_color:+${COLOR_GREEN}}" \
+    || color_alive="${use_color:+${COLOR_RED}}"
+
+    printf -- "${color_alive}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
+      "${my_esxi_list[${esxi_id}]}" \
+      "$(print_param esxi_ssh_username ${esxi_id})" \
+      "$(print_param esxi_hostname ${esxi_id})" \
+      "$(print_param esxi_ssh_port ${esxi_id})"
+
+    for vm_id in "${!my_vm_list[@]}"
+    do
+      if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" ]
+      then
+        [ -v ping_list[${vm_id}] ] \
+        && color_alive="${use_color:+${COLOR_GREEN}}" \
+        || color_alive="${use_color:+${COLOR_RED}}"
+
+        printf -- "\n"
+        printf -- "  ${color_alive}%s${COLOR_NORMAL} (%s@%s:%s) [%s]:\n" \
+          "${my_vm_list[${vm_id}]}" \
+          "$(print_param vm_ssh_username ${vm_id})" \
+          "$(print_param vm_ipv4_address ${vm_id})" \
+          "$(print_param vm_ssh_port ${vm_id})" \
+          "$(print_param vm_guest_type ${vm_id})"
+        printf -- "    network=\"%s\" netmask=\"%s\" gateway=\"%s\"\n" \
+          "$(print_param vm_network_name ${vm_id})" \
+          "$(print_param vm_ipv4_netmask ${vm_id})" \
+          "$(print_param vm_ipv4_gateway ${vm_id})"
+        printf -- "    datastore=\"%s\" iso_path=\"%s\"\n" \
+          "$(print_param vm_esxi_datastore ${vm_id})" \
+          "$(print_param local_iso_path ${vm_id})"
+      fi
+    done
+    echo
   done
+  echo "Total: ${#my_esxi_list[@]} esxi instances and ${#my_vm_list[@]} virtual machines on them"
   exit 0
 }
-
 
 function fill_and_check_configuration {
   local \
