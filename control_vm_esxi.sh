@@ -96,38 +96,51 @@ function command_create {
       "Usage: ${my_name} ${command_name} <vm_id>"
   fi
 
-  local vm_id="${1}"
-  if [ ! -v vm_list[${vm_id}] ]
+  parse_configuration_file
+
+  local vm_name="${1}"
+  local vm_id
+
+  if [[ ! " ${my_vm_list[@]} " =~ " ${vm_name} " ]]
   then
     error \
-      "The specified '${vm_id}' is not exists in configuration file" \
+      "The specified '${vm_name}' is not exists in configuration file" \
       "Please check and try again"
   fi
+
+  for vm_id in "${!my_vm_list[@]}"
+  do
+    if [ "${my_vm_list[${vm_id}]}" = "${vm_name}" ]
+    then
+      break
+    fi
+  done
 
   local param
   for param in \
     at \
-    iso_path \
-    ipv4_address \
-    ipv4_netmask \
-    ipv4_gateway \
-    password
+    local_iso_path \
+    vm_ipv4_address \
+    vm_ipv4_netmask \
+    vm_ipv4_gateway \
+    vm_ssh_password
   do
-    local vm_${param}
-    eval vm_${param}=\"\${vm_${vm_id}_params[\${param}]}\"
+    local ${param}
+    eval ${param}=\"\${my_all_params[${vm_id}.${param}]}\"
   done
   for param in \
-    datastore \
-    hostname \
-    password
+    esxi_datastore \
+    esxi_hostname \
+    esxi_ssh_username \
+    esxi_ssh_password
   do
-    local esxi_${param}
-    eval esxi_${param}=\"\${esxi_${vm_at}_params[\${param}]}\"
+    local ${param}
+    eval ${param}=\"\${my_all_params[${at}.${param}]}\"
   done
 
+  local esxi_name="${my_esxi_list[${at}]}"
   local vm_mac_address=$(ip_to_mac ${vm_ipv4_address} ${vm_ipv4_netmask} ${vm_ipv4_gateway})
-
-  info "Will create a '${vm_id}' on '${vm_at}' (${esxi_hostname})"
+  info "Will create a '${vm_name}' (${vm_ipv4_address}) on '${esxi_name}' (${esxi_hostname})"
 
   check_dependencies
 
@@ -146,7 +159,7 @@ function command_create {
 
   progress "Checking the SSH connection to the hypervisor (ssh)"
   sshpass \
-    -p "${esxi_password}" \
+    -p "${esxi_ssh_password}" \
     ssh \
     -q \
     -o ConnectTimeout=1 \
@@ -164,7 +177,7 @@ function command_create {
 
   progress "Checking requirements on hypervisor (type -f)"
   sshpass \
-    -p "${esxi_password}" \
+    -p "${esxi_ssh_password}" \
     ssh \
     -q \
     -o ConnectTimeout=1 \
@@ -189,7 +202,7 @@ EOF
 
   progress "Checking already existance virtual machine on hypervisor (vim-cmd)"
   sshpass \
-    -p "${esxi_password}" \
+    -p "${esxi_ssh_password}" \
     ssh \
     -q \
     -o ConnectTimeout=1 \
@@ -197,7 +210,7 @@ EOF
     -o StrictHostKeyChecking=no \
     root@"${esxi_hostname}" \
   <<EOF
-vm_id="${vm_id}"
+vm_name="${vm_name}"
 
 all_vms=\$(
   vim-cmd vmsvc/getallvms
@@ -206,7 +219,7 @@ all_vms=\$(
 && exit 100
 
 vm_esxi_id=\$(
-  awk "\\\$2==\"\${vm_id}\" {print \\\$1;}" <<EOF2
+  awk "\\\$2==\"\${vm_name}\" {print \\\$1;}" <<EOF2
 \${all_vms}
 EOF2
 )
@@ -231,13 +244,13 @@ EOF
         ;;
   esac
 
-  local vm_dir="/vmfs/volumes/${esxi_datastore}/${vm_id}"
-  local vm_iso_file="${vm_iso_path##*/}"
+  local vm_dir="/vmfs/volumes/${esxi_datastore}/${vm_name}"
+  local vm_iso_file="${local_iso_path##*/}"
   local esxi_iso_dir="/vmfs/volumes/${esxi_datastore}/.iso"
 
   progress "Checking existance the ISO image file on hypervisor (test -s)"
   sshpass \
-    -p "${esxi_password}" \
+    -p "${esxi_ssh_password}" \
     ssh \
     -q \
     -o ConnectTimeout=1 \
@@ -256,7 +269,7 @@ EOF
   then
     progress "Upload the ISO image file to hypervisor (scp)"
     sshpass \
-      -p "${esxi_password}" \
+      -p "${esxi_ssh_password}" \
       scp \
       -o ConnectTimeout=1 \
       -o NumberOfPasswordPrompts=1 \
@@ -274,7 +287,7 @@ EOF
 
   progress "Create the virtual machine configuration on hypervisor"
   sshpass \
-    -p "${esxi_password}" \
+    -p "${esxi_ssh_password}" \
     ssh \
     -q \
     -o ConnectTimeout=1 \
@@ -283,7 +296,7 @@ EOF
     root@"${esxi_hostname}" \
   <<EOF
 vm_dir="${vm_dir}"
-vm_id="${vm_id}"
+vm_name="${vm_name}"
 
 [ -d "\${vm_dir}" ] \
 && exit 100
@@ -292,14 +305,14 @@ mkdir "\${vm_dir}" \
 || exit 101
 
 cat \
->"\${vm_dir}/\${vm_id}.vmx" \
+>"\${vm_dir}/\${vm_name}.vmx" \
 <<EOF2
 .encoding = "UTF-8"
 bios.bootorder = "CDROM"
 checkpoint.vmstate = ""
 cleanshutdown = "TRUE"
 config.version = "8"
-displayname = "\${vm_id}"
+displayname = "\${vm_name}"
 ethernet0.address = "${vm_mac_address}"
 ethernet0.addresstype = "static"
 ethernet0.bsdname = "en0"
@@ -311,7 +324,7 @@ ethernet0.pcislotnumber = "33"
 ethernet0.present = "TRUE"
 ethernet0.virtualdev = "vmxnet3"
 ethernet0.wakeonpcktrcv = "FALSE"
-extendedconfigfile = "\${vm_id}.vmxf"
+extendedconfigfile = "\${vm_name}.vmxf"
 floppy0.present = "FALSE"
 guestos = "debian8-64"
 hpet0.present = "TRUE"
@@ -322,7 +335,7 @@ ide0:0.startConnected = "TRUE"
 mem.hotadd = "TRUE"
 memsize = "1024"
 msg.autoanswer = "true"
-nvram = "\${vm_id}.nvram"
+nvram = "\${vm_name}.nvram"
 numvcpus = "1"
 pcibridge0.present = "TRUE"
 pcibridge4.functions = "8"
@@ -381,7 +394,7 @@ EOF
 
   progress "Register the virtual machine configuration on hypervisor (vim-cmd solo/registervm)"
   sshpass \
-    -p "${esxi_password}" \
+    -p "${esxi_ssh_password}" \
     ssh \
     -q \
     -o ConnectTimeout=1 \
@@ -389,13 +402,13 @@ EOF
     -o StrictHostKeyChecking=no \
     root@"${esxi_hostname}" \
   <<EOF
-vm_id="${vm_id}"
-vm_vmx_path="/vmfs/volumes/${esxi_datastore}/${vm_id}/${vm_id}.vmx"
+vm_name="${vm_name}"
+vm_vmx_path="/vmfs/volumes/${esxi_datastore}/${vm_name}/${vm_name}.vmx"
 
 vim-cmd \
   solo/registervm \
   "\${vm_vmx_path}" \
-  "\${vm_id}" \
+  "\${vm_name}" \
 >/dev/null
 EOF
   if [ ${?} -gt 0 ]
@@ -407,7 +420,7 @@ EOF
 
   progress "Power on the virtual machine on hypervisor (vim-cmd vmsvc/power.on)"
   sshpass \
-    -p "${esxi_password}" \
+    -p "${esxi_ssh_password}" \
     ssh \
     -q \
     -o ConnectTimeout=1 \
@@ -415,7 +428,7 @@ EOF
     -o StrictHostKeyChecking=no \
     root@"${esxi_hostname}" \
   <<EOF
-vm_id="${vm_id}"
+vm_name="${vm_name}"
 
 all_vms=\$(
   vim-cmd vmsvc/getallvms
@@ -424,7 +437,7 @@ all_vms=\$(
 && exit 100
 
 vm_esxi_id=\$(
-  awk "\\\$2==\"\${vm_id}\" {print \\\$1;}" <<EOF2
+  awk "\\\$2==\"\${vm_name}\" {print \\\$1;}" <<EOF2
 \${all_vms}
 EOF2
 )
