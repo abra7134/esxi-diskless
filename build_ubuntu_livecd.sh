@@ -278,7 +278,7 @@ function trap_sigint {
   warning "Interrupted"
 }
 
-trap "internal cleanup_before_exit;" ERR
+trap "post_command=cleanup_before_exit internal;" ERR
 trap "trap_sigint;" SIGINT
 
 run_command "${@}"

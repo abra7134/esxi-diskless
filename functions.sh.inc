@@ -67,30 +67,41 @@ function progress {
 }
 
 function internal {
-  if [ -z "${FUNCNAME[2]}" ]
+  local i=""
+  local stack_trace_message=()
+
+  # Prepare the stack trace message for debugging
+  for (( i=1; i<${#FUNCNAME[@]}; i++ ))
+  do
+    stack_trace_message+=("-> ${FUNCNAME[i]}() at ${BASH_SOURCE[i]}:${BASH_LINENO[i-1]}")
+  done
+
+  if [ -z "${1}" ]
   then
     _print shit \
-      "Happen in '${FUNCNAME[1]}' function call at ${BASH_LINENO[0]} line" \
-      "Let the developer know or solve the problem yourself"
-
-    local post_command="${1}"
-    if [ -n "${post_command}" ]
-    then
-      local post_command_type=$(
-        type -t "${post_command}"
-      )
-      if [ "${post_command_type}" != "function" ]
-      then
-        internal "The post_command is not a function, please inform a maintainer"
-      fi
-      "${post_command}" \
-      || internal "Can't run a post command, please check it manually"
-    fi
+      "Happen, let a maintainer know or solve the problem yourself" \
+      "" \
+      "Stack trace:" \
+      "${stack_trace_message[@]}"
   else
     _print internal \
-      "Problem in '${FUNCNAME[2]}' -> '${FUNCNAME[1]}' function call at ${BASH_LINENO[1]} line:" \
-      "${@}"
+      "${@}" \
+      "" \
+      "Stack trace:" \
+      "${stack_trace_message[@]}"
   fi
+
+  if [ -n "${post_command}" ]
+  then
+    if ! declare -F "${post_command}" >/dev/null
+    then
+      post_command="" \
+        internal "The value of 'post_command' is not a function, please inform a maintainer"
+    fi
+
+    "${post_command}"
+  fi
+
   exit 2
 }
 
