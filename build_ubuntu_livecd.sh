@@ -26,6 +26,7 @@ my_files_dir="${my_dir}/${my_file%.*}_files"
 my_provision_dir="${my_files_dir}/provision_files"
 
 set -o errexit
+set -o errtrace
 
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
 then
