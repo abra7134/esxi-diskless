@@ -51,10 +51,12 @@ my_all_params=(
   [0.vm_ipv4_address]=""
   [0.vm_ipv4_netmask]="255.255.255.0"
   [0.vm_ipv4_gateway]=""
+  [0.vm_memory_mb]=1024
   [0.vm_network_name]="VM Network"
   [0.vm_ssh_password]=""
   [0.vm_ssh_port]=22
   [0.vm_ssh_username]="root"
+  [0.vm_vcpus]=1
 )
 
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
@@ -641,8 +643,8 @@ function parse_configuration_file {
           error="it must consist of characters (in regex notation): [[:alnum:]_.-]"
         ;;
       "esxi_ssh_port"|"vm_ssh_port" )
-        [[    "${value}" =~ ^[[:digit:]]+$ \
-           && "${value}" -ge 0 \
+        [[    "${value}" =~ ^[[:digit:]]+$
+           && "${value}" -ge 0
            && "${value}" -le 65535 ]] \
         || \
           error="it must be a number from 0 to 65535"
@@ -655,12 +657,26 @@ function parse_configuration_file {
           error="it must be the correct IPv4 address (in x.x.x.x format)"
         ;;
       "vm_ipv4_netmask" )
-        [[    "${value}" =~ ^255\.255\.255\.(255|254|252|248|240|224|192|128|0)$ \
-           || "${value}" =~ ^255\.255\.(255|254|252|248|240|224|192|128|0)\.0$ \
-           || "${value}" =~ ^255\.(255|254|252|248|240|224|192|128|0)\.0\.0$ \
+        [[    "${value}" =~ ^255\.255\.255\.(255|254|252|248|240|224|192|128|0)$
+           || "${value}" =~ ^255\.255\.(255|254|252|248|240|224|192|128|0)\.0$
+           || "${value}" =~ ^255\.(255|254|252|248|240|224|192|128|0)\.0\.0$
            || "${value}" =~ ^(255|254|252|248|240|224|192|128|0)\.0\.0\.0$ ]] \
         || \
           error="it must be the correct IPv4 netmask (in x.x.x.x format)"
+        ;;
+      "vm_memory_mb" )
+        [[    "${value}" =~ ^[[:digit:]]+$
+           && "${value}" -gt 1024
+           && "${value}" -le 32768 ]] \
+        || \
+          error="it must be a number from 1024 to 32768"
+        ;;
+      "vm_vcpus" )
+        [[    "${value}" =~ ^[[:digit:]]+$
+           && "${value}" -gt 0
+           && "${value}" -le 8 ]] \
+        || \
+          error="it must be a number from 1 to 8"
         ;;
       * )
         [ -n "${value}" ] \

@@ -35,10 +35,12 @@ vm_guest_type="debian8-64"
 vm_ipv4_address=""
 vm_ipv4_netmask="255.255.255.0"
 vm_ipv4_gateway=""
+vm_memory_mb=1024
 vm_network_name="VM Network"
 vm_ssh_password=""
 vm_ssh_port=22
 vm_ssh_username="root"
+vm_vcpus=1
 
 [esxi_list]
 
