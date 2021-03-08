@@ -2,8 +2,9 @@
 
 ##### build_ubuntu_livecd.sh
 
+* Перейти на использование systemd-networkd вместо ifupdown;
+
 ##### control_vm_esxi.sh
 
-* Добавить поддержку в подкоманды указание списком (вирт.машин или гипервизоров);
-* Перейти на единое SSH-соединение до ESXi через control_master опцию;
-* Перейти на использование systemd-networkd вместо ifupdown;
+* Добавить новые параметры `esxi_ssh_connect_timeout`, `vm_ssh_connect_timeout`, `vm_deploy_script_path`;
+* Добавить новые команды 'deploy' (с подстветкой неотдеплоенных нод в команде 'ls'), 'up', 'down';

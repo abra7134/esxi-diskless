@@ -15,6 +15,7 @@ function _print {
   case "${print_type}" in
     "info" )
       local info_message
+      echo
       for info_message in "${@}"; do
         printf -- "${COLOR_YELLOW}!!! ${info_message}${COLOR_NORMAL}\n"
       done
@@ -56,6 +57,10 @@ function error {
 function warning {
   _print warning "${@}"
   exit 0
+}
+
+function skipping {
+  _print skipping "${@}"
 }
 
 function info {
@@ -206,6 +211,16 @@ function init_colors {
     COLOR_YELLOW="\e[1;33m"
     UNDERLINE="\033[4m"
     NORMAL="\033[0m"
+  fi
+}
+
+function remove_temp_dir {
+  if [ -d "${temp_dir}" ]
+  then
+    progress "Remove a temporary directory '${temp_dir}'"
+    rm --recursive \
+      "${temp_dir}" \
+    || internal "Can't remove a temporary directory, please do it manually"
   fi
 }
 

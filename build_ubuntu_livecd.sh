@@ -255,17 +255,6 @@ function unmount_fs_from_chroot {
   fi
 }
 
-# The function for remove a temporary directory
-function remove_temp_dir {
-  if [ -d "${temp_dir}" ]
-  then
-    progress "Remove a temporary directory"
-    rm --recursive \
-      "${temp_dir}" \
-    || internal "Don't remove a temporary directory, please do it manually"
-  fi
-}
-
 # The function for cleanup before exit
 function cleanup_before_exit {
   unmount_fs_from_chroot
