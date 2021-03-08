@@ -3,12 +3,10 @@
 # Script for simply control (create/start/stop/remove) of virtual machines on ESXi
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-# ATTENTION: This is ALPHA version, refactoring is coming soon :)
-
 MY_DEPENDENCIES=("scp" "sort" "ssh" "sshpass" "ping")
 MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("ESXI_CONFIG_PATH")
-MY_VERSION="0.1alpha"
+MY_VERSION="1.210308"
 
 ESXI_CONFIG_PATH="${CONFIG_PATH:-"${0%.sh}.ini"}"
 
