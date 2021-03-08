@@ -168,11 +168,6 @@ function command_help {
     return 0
   fi
 
-  if [ -n "${MY_LIMITATIONS}" ]
-  then
-    info "${MY_LIMITATIONS}"
-  fi
-
   echo "Usage:"
   echo "  ${my_name} COMMAND [OPTIONS]"
   echo

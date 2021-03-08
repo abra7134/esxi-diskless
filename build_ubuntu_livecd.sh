@@ -4,7 +4,6 @@
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
 MY_DEPENDENCIES=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mkpasswd" "mksquashfs" "mktemp" "rm" "sed" "touch" "umount")
-MY_LIMITATIONS="This script must be run under the ROOT user"
 MY_NAME="Script for build Ubuntu LiveCD"
 MY_VARIABLES=("UBUNTU_ARCH" "UBUNTU_SUITE" "UBUNTU_OUTPUT_ISO_PATH" "UBUNTU_ROOT_PASSWORD")
 MY_VERSION="1.210212"
@@ -38,7 +37,7 @@ fi
 function command_build {
   if [ "${1}" = "description" ]
   then
-    echo "Build the ISO with Ubuntu LiveCD (parameters are specified in the header)"
+    echo "Build the ISO with Ubuntu LiveCD (must be run under the ROOT user)"
     return 0
   fi
 
