@@ -70,6 +70,12 @@ function internal {
   local i=""
   local stack_trace_message=()
 
+  # Don't print anything if runned from subshell
+  if [ ${BASH_SUBSHELL} -gt 0 ]
+  then
+    return 0
+  fi
+
   # Prepare the stack trace message for debugging
   for (( i=1; i<${#FUNCNAME[@]}; i++ ))
   do
