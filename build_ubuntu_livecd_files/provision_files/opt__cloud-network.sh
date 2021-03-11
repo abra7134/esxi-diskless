@@ -66,4 +66,17 @@ iface eth0 inet static
 address ${ETH0_IP}
 netmask ${ETH0_NETMASK}
 gateway ${ETH0_GATEWAY}
+dns-nameservers 8.8.8.8
 EOF
+
+HOSTNAME=$(vmtoolsd --cmd 'info-get guestinfo.hostname' 2>/dev/null)
+
+if [ ${?} -gt 0 ]
+then
+  echo "Cannot get the hostname from hypervisor"
+else
+  echo "-> HOSTNAME: ${HOSTNAME}"
+  echo "Write /etc/hostname and set hostname"
+  echo "${HOSTNAME}" > /etc/hostname
+  hostname "${HOSTNAME}"
+fi
