@@ -401,6 +401,7 @@ EOF
       [extendedconfigfile]="${vm_name}.vmxf"
       [floppy0.present]="FALSE"
       [guestos]="${params[vm_guest_type]}"
+      [guestinfo.hostname]="${vm_name}"
       [hpet0.present]="TRUE"
       [ide0:0.deviceType]="cdrom-image"
       [ide0:0.fileName]="${esxi_iso_path}"
