@@ -113,8 +113,16 @@ function command_build {
             "${src_file_path}"
           ;;
         "delete" )
-          rm -v \
+          rm --verbose \
             "${dst_file_path}"
+          ;;
+        "tgz" )
+          mkdir "${dst_file_path%.tgz}"
+          tar \
+            --directory "${dst_file_path%.tgz}" \
+            --extract \
+            --file "${src_file_path}" \
+            --verbose
           ;;
         * )
           mkdir --parents \
