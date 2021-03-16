@@ -148,6 +148,7 @@ function run_remote_command {
       -o ControlMaster=auto \
       -o ControlPath=/tmp/ssh-%i-%C \
       -o ControlPersist=60 \
+      -o StrictHostKeyChecking=no \
       -o UserKnownHostsFile=/dev/null \
       "${ssh_param1}" \
       "${ssh_param2}"
