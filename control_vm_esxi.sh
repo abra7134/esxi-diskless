@@ -237,7 +237,6 @@ function command_create {
     temp_file="" \
     vm_esxi_dir="" \
     vm_iso_filename="" \
-    vm_mac_address="" \
     vmx_file_path=""
 
   temp_dir=$(mktemp -d)
@@ -266,12 +265,6 @@ function command_create {
       skipping \
         "The specified path '${params[local_iso_path]}' to ISO-file is not exists" \
         "Please check it, correct and try again"
-      continue
-    elif [[ ! "${params[vm_ipv4_netmask]}" =~ ^255\.255\.255\. ]]
-    then
-      skipping \
-        "At this moment this script support only netmask no more 255.255.255.0, but not '${params[vm_ipv4_netmask]}'" \
-        "Please use smaller IP networks to run this script"
       continue
     elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
            -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
@@ -352,35 +345,6 @@ EOF
     fi
 
     progress "Prepare a virtual machine configuration file .vmx (in ${temp_dir} directory)"
-    # Convert the network configuration to MAC-address
-    set -- \
-      ${params[vm_ipv4_address]//./ } \
-      ${params[vm_ipv4_netmask]//./ } \
-      ${params[vm_ipv4_gateway]//./ }
-    printf -v vm_mac_address \
-      "%.2X:%.2X:%.2X:%.2X:%.2X:%.2X" \
-      ${1} ${2} ${3} ${4} ${8} ${12}
-
-    # And verifying the MAC-address that it is not reserved
-    if [[    "${vm_mac_address}" =~ ^00:00:5E:00:0[0-2]:
-          || "${vm_mac_address}" =~ ^01:00:5E:[0-7]
-          || "${vm_mac_address}" =~ ^33:33:
-          || "${vm_mac_address}" =~ ^CF: ]]
-    then
-      skipping \
-        "The resulting mac address '${vm_mac_address}' is reserved and cannot be used" \
-        "Please use another network configuration for virtual machine" \
-        "" \
-        "Reserved MAC-addresses from RFC5342:" \
-        "00:00:5E:(00:00:00-00:00:FF) - Requires IESG Ratification for allocation" \
-        "00:00:5E:(00:01:00-00:01:FF) - Used for Virtual Router Redundancy Protocol (VRRP) IPV4" \
-        "00:00:5E:(00:02:00-00:02:FF) - Used for Virtual Router Redundancy Protocol (VRRP) IPV6" \
-        "01:00:5E:(00:00:00-7f:ff:ff) - Used for IPV4 Multicast and MLPS Multicast" \
-        "33:33:00-33:33:FF - Reserved for IPV6 Multicast" \
-        "CF:00:00-CF:FF:FF - Reserved by IANA for PPP (Point to Point Protocol)"
-      continue
-    fi
-
     vmx_params=(
       [.encoding]="UTF-8"
       [bios.bootorder]="CDROM"
@@ -388,21 +352,18 @@ EOF
       [cleanshutdown]="TRUE"
       [config.version]="8"
       [displayname]="${vm_name}"
-      [ethernet0.address]="${vm_mac_address}"
-      [ethernet0.addresstype]="static"
-      [ethernet0.bsdname]="en0"
-      [ethernet0.connectiontype]="nat"
-      [ethernet0.displayname]="Ethernet"
-      [ethernet0.linkstatepropagation.enable]="FALSE"
+      [ethernet0.addresstype]="generated"
       [ethernet0.networkname]="${params[vm_network_name]}"
       [ethernet0.pcislotnumber]="33"
       [ethernet0.present]="TRUE"
       [ethernet0.virtualdev]="vmxnet3"
-      [ethernet0.wakeonpcktrcv]="FALSE"
       [extendedconfigfile]="${vm_name}.vmxf"
       [floppy0.present]="FALSE"
       [guestos]="${params[vm_guest_type]}"
       [guestinfo.hostname]="${vm_name}"
+      [guestinfo.ipv4_address]="${params[vm_ipv4_address]}"
+      [guestinfo.ipv4_netmask]="${params[vm_ipv4_netmask]}"
+      [guestinfo.ipv4_gateway]="${params[vm_ipv4_gateway]}"
       [hpet0.present]="TRUE"
       [ide0:0.deviceType]="cdrom-image"
       [ide0:0.fileName]="${esxi_iso_path}"
