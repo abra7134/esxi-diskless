@@ -2,6 +2,10 @@
 
 ##### build_ubuntu_livecd.sh
 
+v1.??????
+- Исправлена ошибка с невозможность корректного выключения виртуальной машины из-за сообщения:
+  `Please remove the installation medium, then press Enter:`
+
 v1.210316
 - Добавлена поддержка распаковки .tgz архивов из provision_files/
 - Добавлена поддержка установки hostname виртуальной машины из `guestinfo.hostname` параметра
