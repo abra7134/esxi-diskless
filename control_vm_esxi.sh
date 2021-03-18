@@ -586,6 +586,9 @@ function command_ls {
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
           "$(print_param vm_guest_type ${vm_id})"
+        printf -- "    memory_mb=\"%s\" vcpus=\"%s\"\n" \
+          "$(print_param vm_memory_mb ${vm_id})" \
+          "$(print_param vm_vcpus ${vm_id})"
         printf -- "    network=\"%s\" gateway=\"%s\" netmask=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
           "$(print_param vm_ipv4_gateway ${vm_id})" \
