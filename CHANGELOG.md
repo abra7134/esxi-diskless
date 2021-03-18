@@ -2,7 +2,7 @@
 
 ##### build_ubuntu_livecd.sh
 
-v1.??????
+v1.210318
 - Исправлена ошибка с невозможность корректного выключения виртуальной машины из-за сообщения:
   `Please remove the installation medium, then press Enter:`
 
