@@ -2,6 +2,9 @@
 
 ##### build_ubuntu_livecd.sh
 
+v1.??????
+- Добавлен `sysctl`-параметр `kernel.panic` для автоматической перезагрузки виртуальной машины
+
 v1.210318
 - Исправлена ошибка с невозможность корректного выключения виртуальной машины из-за сообщения:
   `Please remove the installation medium, then press Enter:`
