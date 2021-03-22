@@ -77,16 +77,14 @@ function ping_host {
 
 function run_remote_command {
   local \
-    ssh_destination="${1}" \
-    ssh_password="${2}"
-  shift 2
+    ssh_destination="${1}"
+  shift
 
   local \
     error_code_index=99 \
     remote_command="" \
     sshpass_command="" \
-    ssh_param1="" \
-    ssh_param2=""
+    ssh_params=()
 
   # Default error code descriptions from sshpass manual page
   local \
@@ -101,42 +99,51 @@ function run_remote_command {
     ) \
     error_description=()
 
-  if [[ "${ssh_destination}" =~ ^(scp|ssh):// ]]
+  # Parse the SSH-destination to support older versions of ssh client
+  if [[ "${ssh_destination}" =~ ^(scp|ssh)\|([^\|]+)\|([^\|]+)\|([^\|]+)\|([^\|]+)(\|[^\|]+)?$ ]]
+  #                              schema     user      password  hostname  port    uri(optional)
+  #                BASH_REMATCH: [1]        [2]       [3]       [4]       [5]     [6]
   then
     sshpass_command="${BASH_REMATCH[1]}"
+    ssh_password="${BASH_REMATCH[3]}"
+    ssh_params+=(
+      "-o Port=${BASH_REMATCH[5]}"
+      "-o User=${BASH_REMATCH[2]}"
+    )
+    if [ "${sshpass_command}" = "ssh" ]
+    then
+      ssh_params+=("${BASH_REMATCH[4]}")
+      # Prepare the remote run command and errors descriptions for future processing
+      for s in "${@}"
+      do
+        # If then line starts with '|| ', it's a error description otherwise the command
+        if [[ "${s}" =~ ^"|| " ]]
+        then
+          error_description=("${error_codes_descriptions[${error_code_index}]}")
+          # Small hack: join the multiline description in one line by '|' symbol
+          error_codes_descriptions+=(
+            [${error_code_index}]="${error_description:+${error_description}|}${s#|| }"
+          )
+       else
+          let error_code_index+=1
+          remote_command+="${s}; [ \${?} -gt 0 ] && exit $((error_code_index)); "
+          error_codes_descriptions+=([${error_code_index}]="")
+        fi
+      done
+      remote_command+="exit 0"
+      ssh_params+=("${remote_command}")
+    else
+      ssh_params+=(
+        "${1}"
+        "${BASH_REMATCH[4]}:${BASH_REMATCH[6]#|}"
+      )
+      # Overwrite the standard description for scp command
+      error_codes_descriptions+=([1]="Failed to copy file to remote server")
+    fi
   else
     internal \
-      "The wrong ssh_destination format = ${ssh_destination}" \
-      "Support only ssh:// and scp:// schemas, please fix it"
-  fi
-
-  if [ "${sshpass_command}" = "ssh" ]
-  then
-    # Prepare the remote run command and errors descriptions for future processing
-    for s in "${@}"
-    do
-      # If then line starts with '|| ', it's a error description otherwise the command
-      if [[ "${s}" =~ ^"|| " ]]
-      then
-        error_description=("${error_codes_descriptions[${error_code_index}]}")
-        # Small hack: join the multiline description in one line by '|' symbol
-        error_codes_descriptions+=(
-          [${error_code_index}]="${error_description:+${error_description}|}${s#|| }"
-        )
-     else
-        let error_code_index+=1
-        remote_command+="${s}; [ \${?} -gt 0 ] && exit $((error_code_index)); "
-        error_codes_descriptions+=([${error_code_index}]="")
-      fi
-    done
-    remote_command+="exit 0"
-    ssh_param1="${ssh_destination}"
-    ssh_param2="${remote_command}"
-  else
-    ssh_param1="${1}"
-    ssh_param2="${ssh_destination}"
-    # Overwrite the standard description for scp command
-    error_codes_descriptions+=([1]="Failed to copy file to remote server")
+      "Cannot parse the SSH-destination = ${ssh_destination}" \
+      "Should look like: (ssh|scp)|username|password|hostname|port[|/path_for_scp], please fix it"
   fi
 
   if \
@@ -150,8 +157,7 @@ function run_remote_command {
       -o ControlPersist=60 \
       -o StrictHostKeyChecking=no \
       -o UserKnownHostsFile=/dev/null \
-      "${ssh_param1}" \
-      "${ssh_param2}"
+      "${ssh_params[@]}"
   then
     # it's a stub because ${?} is only correct set into 'else' section
     :
@@ -286,30 +292,28 @@ function command_create {
     fi
 
     printf -v esxi_ssh_destination \
-      "%s@%s:%s" \
+      "%s|%s|%s|%s" \
       "${params[esxi_ssh_username]}" \
+      "${params[esxi_ssh_password]}" \
       "${params[esxi_hostname]}" \
       "${params[esxi_ssh_port]}"
 
     progress "Check the SSH-connection to the hypervisor (ssh)"
     run_remote_command \
-      "ssh://${esxi_ssh_destination}" \
-      "${params[esxi_ssh_password]}" \
+      "ssh|${esxi_ssh_destination}" \
       "true" \
     || continue
 
     progress "Checking dependencies on hypervisor (type -f)"
     run_remote_command \
-      "ssh://${esxi_ssh_destination}" \
-      "${params[esxi_ssh_password]}" \
+      "ssh|${esxi_ssh_destination}" \
       "type -f awk cat mkdir vim-cmd >/dev/null" \
       "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
     || continue
 
     progress "Checking already existance virtual machine on hypervisor (vim-cmd)"
     run_remote_command \
-      "ssh://${esxi_ssh_destination}" \
-      "${params[esxi_ssh_password]}" \
+      "ssh|${esxi_ssh_destination}" \
       "all_vms=\$(vim-cmd vmsvc/getallvms)" \
       "|| Cannot get list of virtual machines on hypervisor (vim-cmd)" \
       "vm_esxi_id=\$(awk '\$2==\"${vm_name}\" {print \$1;}' <<EOF
@@ -330,16 +334,14 @@ EOF
     progress "Checking existance the ISO image file on hypervisor (test -f)"
     if ! \
       run_remote_command \
-        "ssh://${esxi_ssh_destination}" \
-        "${params[esxi_ssh_password]}" \
+        "ssh|${esxi_ssh_destination}" \
         "mkdir -p \"${esxi_iso_dir}\"" \
         "|| Failed to create directory for storing ISO files on hypervisor" \
         "test -f \"${esxi_iso_path}\""
     then
       progress "Upload the ISO image file to hypervisor (scp)"
       run_remote_command \
-        "scp://${esxi_ssh_destination}${esxi_iso_path}" \
-        "${params[esxi_ssh_password]}" \
+        "scp|${esxi_ssh_destination}|${esxi_iso_path}" \
         "${params[local_iso_path]}" \
       || continue
     fi
@@ -424,8 +426,7 @@ EOF
 
     progress "Upload a virtual machine configuration to hypervisor (scp)"
     run_remote_command \
-      "ssh://${esxi_ssh_destination}" \
-      "${params[esxi_ssh_password]}" \
+      "ssh|${esxi_ssh_destination}" \
       "! test -d \"${vm_esxi_dir}\"" \
       "|| The directory '${vm_esxi_dir}' is already exist on hypervisor" \
       "|| Please remove it manually and try again" \
@@ -433,23 +434,20 @@ EOF
       "|| Failed to create a directory '${vm_esxi_dir}' on hypervisor" \
     || continue
     run_remote_command \
-      "scp://${esxi_ssh_destination}${vm_esxi_dir}/${vm_name}.vmx" \
-      "${params[esxi_ssh_password]}" \
+      "scp|${esxi_ssh_destination}|${vm_esxi_dir}/${vm_name}.vmx" \
       "${vmx_file_path}" \
     || continue
 
     progress "Register the virtual machine configuration on hypervisor (vim-cmd solo/registervm)"
     run_remote_command \
-      "ssh://${esxi_ssh_destination}" \
-      "${params[esxi_ssh_password]}" \
+      "ssh|${esxi_ssh_destination}" \
       "vim-cmd solo/registervm \"${vm_esxi_dir}/${vm_name}.vmx\" \"${vm_name}\" >./vm_id" \
       "|| Failed to register a virtual machine on hypervisor" \
     || continue
 
     progress "Power on the virtual machine on hypervisor (vim-cmd vmsvc/power.on)"
     run_remote_command \
-      "ssh://${esxi_ssh_destination}" \
-      "${params[esxi_ssh_password]}" \
+      "ssh|${esxi_ssh_destination}" \
       "vm_id=\$(cat ./vm_id)" \
       "|| Cannot get the 'vm_id' from the special temporary file ./vm_id from previous step" \
       "vim-cmd vmsvc/power.on \"\${vm_id}\" >/dev/null" \
@@ -613,7 +611,7 @@ function parse_configuration_file {
 
     case "${param}"
     in
-      "esxi_hostname" )
+      "esxi_hostname"|"esxi_ssh_username"|"vm_ssh_username" )
         [[ "${value}" =~ ^[[:alnum:]_\.\-]+$ ]] \
         || \
           error="it must consist of characters (in regex notation): [[:alnum:]_.-]"
@@ -626,6 +624,9 @@ function parse_configuration_file {
           error="it must be a number from 0 to 65535"
         ;;
       "esxi_ssh_password"|"vm_ssh_password" )
+        [[ "${value}" =~ \| ]] \
+        || \
+          error="please don't use | symbol, it used in internal logic"
         ;;
       "vm_ipv4_address"|"vm_ipv4_gateway" )
         [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
