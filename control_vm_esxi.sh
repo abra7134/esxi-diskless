@@ -41,7 +41,7 @@ declare -A \
 my_all_params=(
   [0.esxi_hostname]=""
   [0.esxi_ssh_password]=""
-  [0.esxi_ssh_port]=22
+  [0.esxi_ssh_port]="22"
   [0.esxi_ssh_username]="root"
   [0.local_iso_path]=""
   [0.vm_esxi_datastore]="datastore1"
@@ -49,12 +49,12 @@ my_all_params=(
   [0.vm_ipv4_address]=""
   [0.vm_ipv4_netmask]="255.255.255.0"
   [0.vm_ipv4_gateway]=""
-  [0.vm_memory_mb]=1024
+  [0.vm_memory_mb]="1024"
   [0.vm_network_name]="VM Network"
   [0.vm_ssh_password]=""
-  [0.vm_ssh_port]=22
+  [0.vm_ssh_port]="22"
   [0.vm_ssh_username]="root"
-  [0.vm_vcpus]=1
+  [0.vm_vcpus]="1"
 )
 
 set -o errexit
@@ -121,13 +121,11 @@ function run_remote_command {
         then
           error_description=("${error_codes_descriptions[${error_code_index}]}")
           # Small hack: join the multiline description in one line by '|' symbol
-          error_codes_descriptions+=(
-            [${error_code_index}]="${error_description:+${error_description}|}${s#|| }"
-          )
+          error_codes_descriptions[${error_code_index}]="${error_description:+${error_description}|}${s#|| }"
        else
           let error_code_index+=1
           remote_command+="${s}; [ \${?} -gt 0 ] && exit $((error_code_index)); "
-          error_codes_descriptions+=([${error_code_index}]="")
+          error_codes_descriptions[${error_code_index}]=""
         fi
       done
       remote_command+="exit 0"
@@ -138,7 +136,7 @@ function run_remote_command {
         "${BASH_REMATCH[4]}:${BASH_REMATCH[6]#|}"
       )
       # Overwrite the standard description for scp command
-      error_codes_descriptions+=([1]="Failed to copy file to remote server")
+      error_codes_descriptions[1]="Failed to copy file to remote server"
     fi
   else
     internal \
@@ -259,7 +257,7 @@ function command_create {
     do
       if [[ "${param}" =~ ^(${vm_id}|${esxi_id})\.(.*)$ ]]
       then
-        params+=([${BASH_REMATCH[2]}]="${my_all_params[${param}]}")
+        params[${BASH_REMATCH[2]}]="${my_all_params[${param}]}"
       fi
     done
 
@@ -539,7 +537,7 @@ function command_ls {
       hostname="${my_all_params[${id}.esxi_hostname]}${my_all_params[${id}.vm_ipv4_address]}"
       if ping_host "${hostname}"
       then
-        ping_list+=([${id}]="yes")
+        ping_list[${id}]="yes"
       fi
     done
 
@@ -778,10 +776,10 @@ function parse_configuration_file {
         case "${section_name}"
         in
           "esxi_list" )
-            my_esxi_list+=([${resource_id}]="${config_resource_name}")
+            my_esxi_list[${resource_id}]="${config_resource_name}"
             ;;
           "vm_list" )
-            my_vm_list+=([${resource_id}]="${config_resource_name}")
+            my_vm_list[${resource_id}]="${config_resource_name}"
             ;;
           * )
             error_config \
@@ -852,7 +850,7 @@ function parse_configuration_file {
         if [ "${my_all_params[0.${config_parameter}]}" != "${config_value}" ]
         then
           check_param_value "${config_parameter}" "${config_value}"
-          my_all_params+=([${resource_id}.${config_parameter}]="${config_value}")
+          my_all_params[${resource_id}.${config_parameter}]="${config_value}"
         fi
 
         # If line ending with '\' symbol, associate the parameters from next line with current resource_id
@@ -891,7 +889,7 @@ function parse_configuration_file {
               "Please fill the value of parameter and try again"
           fi
 
-          my_all_params+=([${esxi_id}.${config_parameter}]="${default_value}")
+          my_all_params[${esxi_id}.${config_parameter}]="${default_value}"
         fi
       done
     elif [[ "${config_parameter}" =~ ^0\.(.*)$ ]]
@@ -930,7 +928,7 @@ function parse_configuration_file {
               "Please fill the value of parameter and try again"
           fi
 
-          my_all_params+=([${vm_id}.${config_parameter}]="${default_value}")
+          my_all_params[${vm_id}.${config_parameter}]="${default_value}"
         fi
       done
     fi
