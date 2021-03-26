@@ -40,6 +40,7 @@ vm_network_name="VM Network"
 vm_ssh_password=""
 vm_ssh_port=22
 vm_ssh_username="root"
+vm_timezone="Etc/UTC"
 vm_vcpus=1
 
 [esxi_list]

@@ -54,6 +54,7 @@ my_all_params=(
   [0.vm_ssh_password]=""
   [0.vm_ssh_port]="22"
   [0.vm_ssh_username]="root"
+  [0.vm_timezone]="Etc/UTC"
   [0.vm_vcpus]="1"
 )
 
@@ -371,6 +372,7 @@ EOF
       [guestinfo.ipv4_address]="${params[vm_ipv4_address]}"
       [guestinfo.ipv4_netmask]="${params[vm_ipv4_netmask]}"
       [guestinfo.ipv4_gateway]="${params[vm_ipv4_gateway]}"
+      [guestinfo.timezone]="${params[vm_timezone]}"
       [hpet0.present]="TRUE"
       [ide0:0.deviceType]="cdrom-image"
       [ide0:0.fileName]="${esxi_iso_path}"
@@ -595,9 +597,10 @@ function command_ls {
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
           "$(print_param vm_guest_type ${vm_id})"
-        printf -- "    memory_mb=\"%s\" vcpus=\"%s\"\n" \
+        printf -- "    memory_mb=\"%s\" vcpus=\"%s\" timezone=\"%s\"\n" \
           "$(print_param vm_memory_mb ${vm_id})" \
-          "$(print_param vm_vcpus ${vm_id})"
+          "$(print_param vm_vcpus ${vm_id})" \
+          "$(print_param vm_timezone ${vm_id})"
         printf -- "    network=\"%s\" gateway=\"%s\" netmask=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
           "$(print_param vm_ipv4_gateway ${vm_id})" \
@@ -655,6 +658,11 @@ function parse_configuration_file {
            && "${value}" -le 32768 ]] \
         || \
           error="it must be a number from 1024 to 32768"
+        ;;
+      "vm_timezone" )
+        [[ "${value}/" =~ ^([[:alnum:]_\+\-]+/)+$ ]] \
+        || \
+          error="it must consist of characters (in regex notation): [[:alnum:]_-+/]"
         ;;
       "vm_vcpus" )
         [[    "${value}" =~ ^[[:digit:]]+$
