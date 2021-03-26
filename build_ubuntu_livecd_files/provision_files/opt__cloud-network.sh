@@ -54,3 +54,25 @@ then
 else
   echo "!!! Cannot get the hostname from hypervisor"
 fi
+
+if
+  TIMEZONE=$(vmx_get guestinfo.timezone)
+then
+  echo "-> TIMEZONE: ${TIMEZONE}"
+  if
+    TIMEZONE_REALPATH=$(realpath "/usr/share/zoneinfo/${TIMEZONE}") \
+    && [[ "${TIMEZONE_REALPATH}" =~ ^/usr/share/zoneinfo/ ]] \
+    && [ -f "${TIMEZONE_REALPATH}" ]
+  then
+    echo "Write /etc/localtime"
+    ln --force \
+      --symbolic \
+      "${TIMEZONE_REALPATH}" \
+      /etc/localtime
+  else
+    echo "!!! The specified TIMEZONE=${TIMEZONE} is not exists in /usr/share/zoneinfo directory"
+    echo "!!! Please check and try again"
+  fi
+else
+  echo "!!! Cannot get the timezone from hypervisor"
+fi
