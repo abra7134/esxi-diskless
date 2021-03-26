@@ -6,7 +6,7 @@
 MY_DEPENDENCIES=("cat" "chroot" "cp" "debootstrap" "mkisofs" "mkpasswd" "mksquashfs" "mktemp" "rm" "sed" "touch" "umount")
 MY_NAME="Script for build Ubuntu LiveCD"
 MY_VARIABLES=("UBUNTU_ARCH" "UBUNTU_SUITE" "UBUNTU_OUTPUT_ISO_PATH" "UBUNTU_ROOT_PASSWORD")
-MY_VERSION="1.210322"
+MY_VERSION="1.210326"
 
 UBUNTU_ARCH="${UBUNTU_ARCH:-amd64}"
 UBUNTU_SUITE="${UBUNTU_SUITE:-xenial}"
