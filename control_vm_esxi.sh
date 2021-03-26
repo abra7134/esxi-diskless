@@ -6,7 +6,7 @@
 MY_DEPENDENCIES=("scp" "sort" "ssh" "sshpass" "ping")
 MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("ESXI_CONFIG_PATH")
-MY_VERSION="1.210316"
+MY_VERSION="1.210326"
 
 ESXI_CONFIG_PATH="${CONFIG_PATH:-"${0%.sh}.ini"}"
 
