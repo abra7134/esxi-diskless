@@ -500,16 +500,33 @@ EOF
 
     echo "    The virtual machine is alive, continue"
     let runned_vms+=1
+    vm_ids[${vm_id}]="runned"
 
   done
 
   remove_temp_dir
 
+  local skipped_vms=$((${#vm_ids[@]}-${runned_vms}))
+
   echo -e "${COLOR_NORMAL}"
   printf \
     "Total: %d created and %d skipped virtual machines" \
     ${runned_vms} \
-    $((${#vm_ids[@]}-${runned_vms}))
+    ${skipped_vms}
+
+  if [ "${skipped_vms}" -gt 0 ]
+  then
+    echo
+    echo
+    echo "Skipped virtual machines list:"
+    for vm_id in "${!vm_ids[@]}"
+    do
+      if [ -z "${vm_ids[${vm_id}]}" ]
+      then
+        echo "  * ${my_vm_list[${vm_id}]}"
+      fi
+    done
+  fi
 }
 
 function command_ls {
