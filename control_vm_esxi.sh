@@ -335,12 +335,17 @@ EOF
     esxi_iso_path="${esxi_iso_dir}/${vm_iso_filename}"
 
     progress "Checking existance the ISO image file on hypervisor (test -f)"
+    run_remote_command \
+      "ssh" \
+      "${esxi_ssh_destination[@]}" \
+      "mkdir -p \"${esxi_iso_dir}\"" \
+      "|| Failed to create directory for storing ISO files on hypervisor" \
+    || continue
+
     if ! \
       run_remote_command \
         "ssh" \
         "${esxi_ssh_destination[@]}" \
-        "mkdir -p \"${esxi_iso_dir}\"" \
-        "|| Failed to create directory for storing ISO files on hypervisor" \
         "test -f \"${esxi_iso_path}\""
     then
       progress "Upload the ISO image file to hypervisor (scp)"
