@@ -19,11 +19,17 @@
 #   esxi_ssh_password="password" esxi_ssh_port=5252  # Multiple options can be set on the same line
 #
 # [vm_list]
-# vm1 at="esxi1" \                                   # 'at' parameter is required
+# vm1 at="esxi1" \                                   # 'at' parameter is required for virtual machine definition
 #   local_iso_path="ubuntu-xenial-amd64-live-v1.iso" vm_ipv4_address="X.X.X.X" \
 #     vm_ipv4_netmask="X.X.X.X" vm_ipv4_gateway="X.X.X.X"
 #
 
+###
+### The following are real sections so that you can simply rename the .example file and use it right away
+###
+
+# A list with all available parameters and their default values
+# (which will be used if not specified at all)
 [defaults]
 esxi_hostname=""
 esxi_ssh_password=""
