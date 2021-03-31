@@ -272,6 +272,12 @@ function command_create {
         "The specified path '${params[local_iso_path]}' to ISO-file is not exists" \
         "Please check it, correct and try again"
       continue
+    elif [ "${params[vm_ipv4_address]}" = "${params[vm_ipv4_gateway]}" ]
+    then
+      skipping \
+        "The specified gateway '${params[vm_ipv4_gateway]}' cannot be equal to an address" \
+        "Please correct address or gateway address of virtual machine"
+      continue
     elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
            -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
     then
