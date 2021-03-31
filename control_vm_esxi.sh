@@ -694,6 +694,23 @@ function parse_configuration_file {
       "${@}"
   }
 
+  # The function for find duplicates in list
+  function check_duplicates {
+    local \
+      find_item="${1}" \
+      i
+
+    shift
+    for i in "${@}"
+    do
+      if [ "${i}" = "${find_item}" ]
+      then
+        return 0
+      fi
+    done
+    return 1
+  }
+
   if [ ! -s "${ESXI_CONFIG_PATH}" ]
   then
     error \
@@ -794,10 +811,30 @@ function parse_configuration_file {
         case "${section_name}"
         in
           "esxi_list" )
-            my_esxi_list[${resource_id}]="${config_resource_name}"
+            if \
+              check_duplicates \
+              "${config_resource_name}" \
+              "${my_esxi_list[@]}"
+            then
+              error_config \
+                "The duplicate esxi definiton '${config_resource_name}'" \
+                "Please remove or correct its name and try again"
+            else
+              my_esxi_list[${resource_id}]="${config_resource_name}"
+            fi
             ;;
           "vm_list" )
-            my_vm_list[${resource_id}]="${config_resource_name}"
+            if \
+              check_duplicates \
+              "${config_resource_name}" \
+              "${my_vm_list[@]}"
+            then
+              error_config \
+                "The duplicate virtual machine definition '${config_resource_name}'" \
+                "Please remove or correct its name and try again"
+            else
+              my_vm_list[${resource_id}]="${config_resource_name}"
+            fi
             ;;
           * )
             error_config \
@@ -931,8 +968,6 @@ function parse_configuration_file {
           if [ -v my_all_params[${esxi_id}.${config_parameter}] ]
           then
             default_value="${my_all_params[${esxi_id}.${config_parameter}]}"
-            # Remove vm parameters from esxi section
-            unset my_all_params[${esxi_id}.${config_parameter}]
           else
             default_value="${my_all_params[0.${config_parameter}]}"
           fi
