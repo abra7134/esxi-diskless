@@ -33,9 +33,9 @@ my_dir="${0%/*}"
 # )
 #
 declare -A \
-  my_all_params \
-  my_esxi_list \
-  my_vm_list
+  my_all_params=() \
+  my_esxi_list=() \
+  my_vm_list=()
 
 # Init default values
 my_all_params=(
@@ -230,7 +230,7 @@ function command_create {
 
   function get_esxi_vm_map {
     local -A \
-      params
+      params=()
     local \
       esxi_id="" \
       esxi_name="" \
@@ -305,8 +305,8 @@ EOF
   parse_configuration_file
 
   local -A \
-    esxi_ids \
-    vm_ids
+    esxi_ids=() \
+    vm_ids=()
   local \
     esxi_id="" \
     ignore_unavailable="" \
@@ -350,7 +350,7 @@ EOF
   check_dependencies
 
   local -A \
-    esxi_alive_list
+    esxi_alive_list=()
   local \
     esxi_vm_map=()
 
@@ -365,8 +365,8 @@ EOF
   unset esxi_ids
 
   local -A \
-    params \
-    vmx_params
+    params=() \
+    vmx_params=()
   local \
     attempts=0 \
     esxi_ids=() \
@@ -693,7 +693,8 @@ function command_ls {
     progress "Check network availability all hosts (ping)"
     info "To disable an availability checking use '-n' key"
 
-    local -A ping_list
+    local -A \
+      ping_list=()
     local \
       id="" \
       hostname=""
