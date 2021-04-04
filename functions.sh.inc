@@ -59,10 +59,6 @@ function warning {
   exit 0
 }
 
-function skipping {
-  _print skipping "${@}"
-}
-
 function info {
   _print info "${@}"
 }

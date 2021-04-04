@@ -76,6 +76,22 @@ function ping_host {
   &>/dev/null
 }
 
+function skipping {
+  _print skipping "${@}"
+
+  # And write in vm_ids array skipping message
+  if [ ${#vm_ids[@]} -gt 0 ]
+  then
+    if [ -v vm_ids[${vm_id}] ]
+    then
+      vm_ids[${vm_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
+    else
+      internal \
+        "The virtual machine with id = '${vm_id}' not exists in \${vm_ids} array"
+    fi
+  fi
+}
+
 function run_remote_command {
   local \
     sshpass_command="${1}" \
@@ -181,8 +197,7 @@ function run_remote_command {
       skipping "${error_description[@]}"
     else
       internal \
-        "The unknown exit error code: ${error_code_index}" \
-        "Let a maintainer know or solve the problem yourself"
+        "The unknown exit error code: ${error_code_index}"
     fi
     return 1
   fi
@@ -374,6 +389,7 @@ EOF
     esxi_iso_path="" \
     esxi_name="" \
     esxi_ssh_destination=() \
+    no_pinging_vms=0 \
     param="" \
     runned_vms=0 \
     temp_dir="" \
@@ -411,7 +427,7 @@ EOF
     if [ -v ${esxi_alive_list[${esxi_id}]} ]
     then
       skipping \
-        "No connectivity to hypervisor (from the virtual machines map preparing stage)"
+        "No connectivity to hypervisor (see virtual machine list preparation stage for details)"
       continue
     fi
 
@@ -420,13 +436,13 @@ EOF
          -a "${esxi_ids[0]}" = "${esxi_name}" ]
     then
       skipping \
-        "The virtual machine '${vm_name}' already exists on this hypervisor"
+        "The virtual machine already exists on hypervisor"
       continue
     elif [ ${#esxi_ids[@]} -gt 0 \
            -a -z "${skip_availability_check}" ]
     then
       skipping \
-        "The virtual machine '${vm_name}' already exists on the following hypervisors:" \
+        "The virtual machine already exists on multiple hypervisors" \
         "${esxi_ids[@]/#/* }"
       continue
     fi
@@ -619,38 +635,36 @@ EOF
       skipping \
         "No connectivity to virtual machine" \
         "Please verify that the virtual machine is up manually"
+
+      let no_pinging_vms+=1
+      vm_ids[${vm_id}]="${COLOR_YELLOW}RUNNED/NO PINGING${COLOR_NORMAL}"
       continue
     fi
 
     echo "    The virtual machine is alive, continue"
     let runned_vms+=1
-    vm_ids[${vm_id}]="runned"
+    vm_ids[${vm_id}]="${COLOR_GREEN}RUNNED/PINGED${COLOR_NORMAL}"
 
   done
 
   remove_temp_dir
 
-  local skipped_vms=$((${#vm_ids[@]}-${runned_vms}))
-
   echo -e "${COLOR_NORMAL}"
-  printf \
-    "Total: %d created and %d skipped virtual machines" \
-    ${runned_vms} \
-    ${skipped_vms}
+  echo "Processed virtual machines status:"
+  for vm_id in "${!vm_ids[@]}"
+  do
+    esxi_id="${my_all_params[${vm_id}.at]}"
+    esxi_name="${my_esxi_list[${esxi_id}]}"
+    vm_name="${my_vm_list[${vm_id}]}"
+    echo -e "  * ${esxi_name}/${COLOR_WHITE}${vm_name}${COLOR_NORMAL} ${vm_ids[${vm_id}]}"
+  done
 
-  if [ "${skipped_vms}" -gt 0 ]
-  then
-    echo
-    echo
-    echo "Skipped virtual machines list:"
-    for vm_id in "${!vm_ids[@]}"
-    do
-      if [ -z "${vm_ids[${vm_id}]}" ]
-      then
-        echo "  * ${my_vm_list[${vm_id}]}"
-      fi
-    done
-  fi
+  echo
+  printf \
+    "Total: %d runned, %d runned and no pinging, %d skipped virtual machines" \
+    ${runned_vms} \
+    ${no_pinging_vms} \
+    $((${#vm_ids[@]}-runned_vms-no_pinging_vms))
 }
 
 function command_ls {
