@@ -92,6 +92,42 @@ function skipping {
   fi
 }
 
+function show_processed_vm_status {
+  local \
+    aborted_vm_id="${vm_id}"
+  local \
+    esxi_id="" \
+    esxi_name="" \
+    vm_id="" \
+    vm_name="" \
+    vm_status=""
+
+  if [ "${#vm_ids[@]}" -gt 0 ]
+  then
+    echo -e "${COLOR_NORMAL}"
+    echo "Processed virtual machines status:"
+    for vm_id in "${!vm_ids[@]}"
+    do
+      esxi_id="${my_all_params[${vm_id}.at]}"
+      esxi_name="${my_esxi_list[${esxi_id}]}"
+      vm_name="${my_vm_list[${vm_id}]}"
+
+      if [ "${vm_id}" = "${aborted_vm_id}" \
+           -a -z "${vm_ids[${vm_id}]}" ]
+      then
+        vm_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
+      else
+        vm_status="${vm_ids[${vm_id}]:-NOT PROCESSED}"
+      fi
+
+      printf -- \
+        "  * %-30b %b\n" \
+        "${COLOR_WHITE}${vm_name}${COLOR_NORMAL}/${esxi_name}" \
+        "${vm_status}"
+    done
+  fi
+}
+
 function run_remote_command {
   local \
     sshpass_command="${1}" \
@@ -249,6 +285,7 @@ function command_create {
     local \
       esxi_id="" \
       esxi_name="" \
+      vm_id="" \
       vm_map=""
 
     esxi_vm_map=()
@@ -649,16 +686,7 @@ EOF
 
   remove_temp_dir
 
-  echo -e "${COLOR_NORMAL}"
-  echo "Processed virtual machines status:"
-  for vm_id in "${!vm_ids[@]}"
-  do
-    esxi_id="${my_all_params[${vm_id}.at]}"
-    esxi_name="${my_esxi_list[${esxi_id}]}"
-    vm_name="${my_vm_list[${vm_id}]}"
-    echo -e "  * ${esxi_name}/${COLOR_WHITE}${vm_name}${COLOR_NORMAL} ${vm_ids[${vm_id}]}"
-  done
-
+  show_processed_vm_status
   echo
   printf \
     "Total: %d runned, %d runned and no pinging, %d skipped virtual machines" \
@@ -1155,7 +1183,14 @@ function parse_configuration_file {
   done
 }
 
+# Trap function for SIGINT
+function trap_sigint {
+  remove_temp_dir
+  show_processed_vm_status
+  warning "Interrupted"
+}
+
 trap "post_command=remove_temp_dir internal;" ERR
-trap "remove_temp_dir; warning \"Interrupted\";" SIGINT
+trap "trap_sigint;" SIGINT
 
 run_command "${@}"
