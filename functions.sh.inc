@@ -4,7 +4,8 @@ let _progress_number=1
 MY_DEPENDENCIES+=("tty")
 
 function _print {
-  local print_type="${1}"
+  local \
+    print_type="${1}"
   shift
 
   if [[ -z "${1}" ]]
@@ -68,8 +69,9 @@ function progress {
 }
 
 function internal {
-  local i=""
-  local stack_trace_message=()
+  local \
+    i="" \
+    stack_trace_message=()
 
   # Don't print anything if runned from subshell
   if [ ${BASH_SUBSHELL} -gt 0 ]
@@ -103,7 +105,7 @@ function internal {
     if ! declare -F "${post_command}" >/dev/null
     then
       post_command="" \
-        internal "The value of 'post_command' is not a function, please inform a maintainer"
+      internal "The value of 'post_command' is not a function, please inform a maintainer"
     fi
 
     "${post_command}"
@@ -113,7 +115,9 @@ function internal {
 }
 
 function check_commands {
-  local operation="${1}"
+  local \
+    operation="${1}"
+
   if [   "${operation}" != "print" \
       -a "${operation}" != "check" ]
   then
@@ -129,7 +133,9 @@ function check_commands {
 
   while [ -n "${1}" ]
   do
-    local required_command="${1}"
+    local \
+      required_command="${1}"
+
     if type -P "${required_command}" >/dev/null
     then
       if [ "${operation}" = "print" ]
@@ -175,11 +181,14 @@ function command_help {
     return 0
   fi
 
+  local \
+    function_name=""
+
   echo "Usage:"
   echo "  ${my_name} COMMAND [OPTIONS]"
   echo
   echo "Commands:"
-  local function_name
+
   for function_name in $(compgen -A function)
   do
     if [[ "${function_name}" =~ ^command_ ]]
@@ -192,6 +201,7 @@ function command_help {
     print \
     "${MY_DEPENDENCIES[@]}"
   echo
+
   exit 0
 }
 
@@ -208,6 +218,8 @@ function init_colors {
     UNDERLINE="\033[4m"
     NORMAL="\033[0m"
   fi
+
+  return 0
 }
 
 function remove_temp_dir {
@@ -218,9 +230,16 @@ function remove_temp_dir {
       "${temp_dir}" \
     || internal "Can't remove a temporary directory, please do it manually"
   fi
+
+  return 0
 }
 
 function run_command {
+  local \
+    command_name="" \
+    my_variable="" \
+    v=""
+
   init_colors
 
   echo -en "${COLOR_NORMAL}${UNDERLINE}"
@@ -229,7 +248,6 @@ function run_command {
   echo
 
   echo "Environment variables:"
-  local my_variable
   for v in \
     "${MY_VARIABLES[@]}"
   do
@@ -249,4 +267,6 @@ function run_command {
 
   echo
   info "Done"
+
+  return 0
 }

@@ -34,6 +34,7 @@ my_dir="${0%/*}"
 #
 declare -A \
   my_all_params=() \
+  my_flags=() \
   my_esxi_list=() \
   my_vm_list=()
 
@@ -68,6 +69,12 @@ then
   exit 1
 fi
 
+# Function for pinging the remote host
+#
+#   Input: "${1}"   -  The pinging remote hostname
+#  Return: 0        -  The remote host is pinging
+#          another  -  The remote host is not pinging or error
+#
 function ping_host {
   ping \
     -c 1 \
@@ -76,10 +83,16 @@ function ping_host {
   &>/dev/null
 }
 
+# Function to print 'SKIPPING' message
+# and writing the 'SKIPPING' message in vm_ids[@] array
+#
+#  Input: ${@}         - The message to print
+# Modify: ${vm_ids[@]} - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
+# Return: 0            - Always
+#
 function skipping {
   _print skipping "${@}"
 
-  # And write in vm_ids array skipping message
   if [ ${#vm_ids[@]} -gt 0 ]
   then
     if [ -v vm_ids[${vm_id}] ]
@@ -90,8 +103,17 @@ function skipping {
         "The virtual machine with id = '${vm_id}' not exists in \${vm_ids} array"
     fi
   fi
+
+  return 0
 }
 
+# Function to print the processed virtual machines status
+#
+#  Input: ${vm_id}      - The identifier the current processed virtual machine
+#                         for cases where the process is interrupted
+#         ${vm_ids[@]}  - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
+# Return: 0             - Always
+#
 function show_processed_vm_status {
   local \
     aborted_vm_id="${vm_id}"
@@ -126,8 +148,184 @@ function show_processed_vm_status {
         "${vm_status}"
     done
   fi
+
+  return 0
 }
 
+# The function for retrieving registered virtual machines list on specified hypervisors
+#
+#  Input: ${@}                  - The list esxi'es identifiers to
+# Modify: ${esxi_vm_map[@]}     - Values - virtual machines identifiers in next format:
+#                                 {esxi_id}.{vm_id_on_esxi}.{vm_name}
+#         ${esxi_alive_list[@]} - Keys - esxi'es identifiers, Values - "yes" string
+# Return: 0                     - Always
+#
+function get_esxi_vm_map {
+  local -A \
+    params=()
+  local \
+    esxi_id="" \
+    esxi_name="" \
+    vm_id="" \
+    vm_map=""
+
+  esxi_vm_map=()
+  esxi_alive_list=()
+  for esxi_id in "${@}"
+  do
+    esxi_name="${my_esxi_list[${esxi_id}]}"
+    progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd)"
+
+    get_params "${esxi_id}"
+
+    if ! \
+      vm_map=$(
+        run_remote_command \
+          "ssh" \
+          "${params[esxi_ssh_username]}" \
+          "${params[esxi_ssh_password]}" \
+          "${params[esxi_hostname]}" \
+          "${params[esxi_ssh_port]}" \
+          "type -f awk cat mkdir vim-cmd >/dev/null" \
+          "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
+          "all_vms=\$(vim-cmd vmsvc/getallvms)" \
+          "|| Cannot get list of virtual machines on hypervisor (vim-cmd)" \
+          "awk '\$1!=\"Vmid\" {print \$1 \".\" \$2;}' <<EOF
+\${all_vms}
+EOF
+" \
+          "|| Failed to get virtual machine ID on hypervisor (awk)"
+      )
+    then
+      if [ "${my_flags[skip_availability_check]}" = "yes" ]
+      then
+        continue
+      else
+        if [ "${my_flags[ignore_unavailable]}" = "yes" ]
+        then
+          continue
+        else
+          warning \
+            "The hypervisor '${esxi_name}' not available now," \
+            "therefore, it's not possible to build a virtual machines map on all hypervisors" \
+            "" \
+            "Add '-i' key if you can ignore unavailable hypervisors"
+        fi
+      fi
+    fi
+
+    esxi_alive_list[${esxi_id}]="yes"
+
+    while read vm_id
+    do
+      if [[ "${vm_id}" =~ ^[[:digit:]]+\.[[:alnum:]_\.\-]+$ ]]
+      then
+        esxi_vm_map+=(
+          "${esxi_id}.${vm_id}"
+        )
+      else
+        error \
+          "Cannot parse the '${vm_id}' string obtained from hypervisor" \
+          "Let a maintainer know or solve the problem yourself"
+      fi
+    done \
+    <<EOF
+${vm_map}
+EOF
+  done
+
+  return 0
+}
+
+# Function for getting the needed VM or ESXi parameters
+#
+#  Input: ${1}         - The identifier of virtual machine or esxi on regex notation
+# Modify: ${params[@]} - Keys - parameters names, Values - parameters values
+# Return: 0            - Always
+#
+function get_params {
+  local \
+    regex_id="${1}" \
+    param=""
+
+  params=()
+  for param in "${!my_all_params[@]}"
+  do
+    if [[ "${param}" =~ ^(${regex_id})\.(.*)$ ]]
+    then
+      params[${BASH_REMATCH[2]}]="${my_all_params[${param}]}"
+    fi
+  done
+
+  return 0
+}
+
+# Function for parsing the list of virtual machines specified at the input
+# and preparing 2 arrays with identifiers of encountered hypervisors and virtual machines,
+# and 1 array with flags for script operation controls
+#
+#  Input: ${@}            - List of virtual machines names
+# Modify: ${my_flags[@]}  - Keys - flags names, values - "yes" string
+#         ${esxi_ids[@]}  - Keys - identifiers of hypervisors, values - empty string
+#         ${vm_ids[@]}    - Keys - identifiers of virtual machines, values - empty string
+# Return: 0               - Always
+#
+function parse_vm_list {
+  local \
+    esxi_id="" \
+    vm_id="" \
+    vm_name=""
+
+  esxi_ids=()
+  vm_ids=()
+  for vm_name in "${@}"
+  do
+    case "${vm_name}"
+    in
+      "-i" )
+        my_flags[ignore_unavailable]="yes"
+        continue
+        ;;
+      "-n" )
+        my_flags[skip_availability_check]="yes"
+        continue
+        ;;
+      * )
+        for vm_id in "${!my_vm_list[@]}"
+        do
+          if [ "${my_vm_list[${vm_id}]}" = "${vm_name}" ]
+          then
+            esxi_id="${my_all_params[${vm_id}.at]}"
+            esxi_ids[${esxi_id}]=""
+            vm_ids[${vm_id}]=""
+            continue 2
+          fi
+        done
+        ;;
+    esac
+
+    error \
+      "The specified virtual machine '${vm_name}' is not exists in configuration file" \
+      "Please check the correctness name and try again" \
+      "Available names can be viewed using the '${my_name} ls' command"
+  done
+
+  return 0
+}
+
+# Function to run remote command through SSH-connection
+#
+# Input:  ${1} - The command 'ssh' or 'scp'
+#         ${2} - The username to establish the SSH-connection
+#         ${3} - The password to establish the SSH-connection
+#         ${4} - The hostname for SSH-connection to
+#         ${5} - The port for SSH-connection to
+#         ${@} - List of commands to run on the remote host
+#                and error descriptions (prefixed with ||) to display if they occur
+# Output:      - The stdout from remote command
+# Return: 0    - If it's alright
+#         1    - In other cases
+#
 function run_remote_command {
   local \
     sshpass_command="${1}" \
@@ -140,6 +338,7 @@ function run_remote_command {
   local \
     error_code_index=99 \
     remote_command="" \
+    s="" \
     ssh_params=(
       "-o Port=${ssh_port}"
       "-o User=${ssh_username}"
@@ -253,7 +452,7 @@ function command_create {
       "Available names can be viewed using the '${my_name} ls' command"
   elif [ "${1}" = "description" ]
   then
-    echo "Create and start a virtual machine(s) on ESXi"
+    echo "Create and start virtual machine(s)"
     return 0
   fi
 
@@ -263,142 +462,13 @@ function command_create {
     echo $((${1}*256*256*256+${2}*256*256+${3}*256+${4}))
   }
 
-  # Function for getting the needed VM or ESXi parameters
-  function get_params {
-    local \
-      regex_id="${1}" \
-      param
-
-    params=()
-    for param in "${!my_all_params[@]}"
-    do
-      if [[ "${param}" =~ ^(${regex_id})\.(.*)$ ]]
-      then
-        params[${BASH_REMATCH[2]}]="${my_all_params[${param}]}"
-      fi
-    done
-  }
-
-  function get_esxi_vm_map {
-    local -A \
-      params=()
-    local \
-      esxi_id="" \
-      esxi_name="" \
-      vm_id="" \
-      vm_map=""
-
-    esxi_vm_map=()
-    esxi_alive_list=()
-    for esxi_id in "${@}"
-    do
-      esxi_name="${my_esxi_list[${esxi_id}]}"
-      progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd)"
-
-      get_params "${esxi_id}"
-
-      if ! \
-        vm_map=$(
-          run_remote_command \
-            "ssh" \
-            "${params[esxi_ssh_username]}" \
-            "${params[esxi_ssh_password]}" \
-            "${params[esxi_hostname]}" \
-            "${params[esxi_ssh_port]}" \
-            "type -f awk cat mkdir vim-cmd >/dev/null" \
-            "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
-            "all_vms=\$(vim-cmd vmsvc/getallvms)" \
-            "|| Cannot get list of virtual machines on hypervisor (vim-cmd)" \
-            "awk '\$1!=\"Vmid\" {print \$1 \".\" \$2;}' <<EOF
-\${all_vms}
-EOF
-" \
-            "|| Failed to get virtual machine ID on hypervisor (awk)"
-        )
-      then
-        if [ "${skip_availability_check}" ]
-        then
-          continue
-        else
-          if [ "${ignore_unavailable}" ]
-          then
-            continue
-          else
-            warning \
-              "The hypervisor '${esxi_name}' not available now," \
-              "therefore, it's not possible to build a virtual machines map on all hypervisors" \
-              "" \
-              "Add '-i' key if you can ignore unavailable hypervisors"
-          fi
-        fi
-      fi
-
-      esxi_alive_list[${esxi_id}]="yes"
-
-      while read vm_id
-      do
-        if [[ "${vm_id}" =~ ^[[:digit:]]+\.[[:alnum:]_\.\-]+$ ]]
-        then
-          esxi_vm_map+=(
-            "${esxi_id}.${vm_id}"
-          )
-        else
-          error \
-            "Cannot parse the '${vm_id}' string obtained from hypervisor" \
-            "Let a maintainer know or solve the problem yourself"
-        fi
-      done \
-      <<EOF
-${vm_map}
-EOF
-    done
-  }
-
   parse_configuration_file
 
   local -A \
     esxi_ids=() \
     vm_ids=()
-  local \
-    esxi_id="" \
-    ignore_unavailable="" \
-    skip_availability_check="" \
-    vm_name="" \
-    vm_id=""
 
-  # Prepare the list with specified vm ids in command line
-  for vm_name in "${@}"
-  do
-    case "${vm_name}"
-    in
-      "-i" )
-        ignore_unavailable="yes"
-        continue
-        ;;
-      "-n" )
-        skip_availability_check="yes"
-        continue
-        ;;
-      * )
-        for vm_id in "${!my_vm_list[@]}"
-        do
-          if [ "${my_vm_list[${vm_id}]}" = "${vm_name}" ]
-          then
-            esxi_id="${my_all_params[${vm_id}.at]}"
-            esxi_ids[${esxi_id}]=""
-            vm_ids[${vm_id}]=""
-            continue 2
-          fi
-        done
-        ;;
-    esac
-
-    error \
-      "The specified virtual machine '${vm_name}' is not exists in configuration file" \
-      "Please check the correctness name and try again" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  done
-
+  parse_vm_list "${@}"
   check_dependencies
 
   local -A \
@@ -406,7 +476,7 @@ EOF
   local \
     esxi_vm_map=()
 
-  if [ "${skip_availability_check}" ]
+  if [ "${my_flags[skip_availability_check]}" = "yes" ]
   then
     info "Will prepare a virtual machines map on necessary hypervisors only (specified '-n' key)"
     get_esxi_vm_map "${!esxi_ids[@]}"
@@ -421,6 +491,7 @@ EOF
     vmx_params=()
   local \
     attempts=0 \
+    esxi_id="" \
     esxi_ids=() \
     esxi_iso_dir="" \
     esxi_iso_path="" \
@@ -432,7 +503,9 @@ EOF
     temp_dir="" \
     temp_file="" \
     vm_esxi_dir="" \
+    vm_id="" \
     vm_iso_filename="" \
+    vm_name="" \
     vmx_file_path=""
 
   temp_dir=$(mktemp -d)
@@ -698,7 +771,7 @@ EOF
 function command_ls {
   if [ "${1}" = "description" ]
   then
-    echo "List all of controlled ESXi and VM instances ('-n' key for ping off)"
+    echo "List all of controlled hypervisors and virtual machines instances"
     return 0
   fi
 

@@ -242,10 +242,18 @@ EOF
 }
 
 # The function for unmount a pseudo fs from chroot left after 'debootstrap' operation
+#
+#  Input: ${chroot_dir} - Name of the directory from which the unmount will take place
+# Return: 0             - Always
+#
 function unmount_fs_from_chroot {
   if [ -d "${chroot_dir}" ]
   then
-    local i fs_path fs_name
+    local \
+      i="" \
+      fs_path="" \
+      fs_name=""
+
     for i in \
       proc/loadavg \
       sys/power/state
@@ -261,6 +269,8 @@ function unmount_fs_from_chroot {
       fi
     done
   fi
+
+  return 0
 }
 
 # The function for cleanup before exit
