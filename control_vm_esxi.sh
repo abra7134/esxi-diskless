@@ -73,6 +73,43 @@ fi
 ### Auxiliary functions
 #
 
+# The function for checking virtual machine parameters values
+#
+#  Input: ${params[@]}          - The array with parameters
+# Return: 0                     - If all checks are completed
+#         1                     - Otherwise
+#
+function check_vm_params {
+  # Function to convert ipv4 address from string to integer value
+  function ip4_addr_to_int {
+    set -- ${1//./ }
+    echo $((${1}*256*256*256+${2}*256*256+${3}*256+${4}))
+  }
+
+  if [ ! -f "${params[local_iso_path]}" ]
+  then
+    skipping \
+      "The specified ISO-file path '${params[local_iso_path]}' is not exists" \
+      "Please check it, correct and try again"
+    return 1
+  elif [ "${params[vm_ipv4_address]}" = "${params[vm_ipv4_gateway]}" ]
+  then
+    skipping \
+      "The specified gateway '${params[vm_ipv4_gateway]}' cannot be equal to an address" \
+      "Please correct address or gateway address of virtual machine"
+    return 1
+  elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
+         -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
+  then
+    skipping \
+      "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
+      "Please correct address with netmask or gateway address of virtual machine"
+    return 1
+  fi
+
+  return 0
+}
+
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
 #  Input: ${@}                  - The list esxi'es identifiers to
@@ -464,12 +501,6 @@ function command_create {
     return 0
   fi
 
-  # Function to convert ipv4 address from string to integer value
-  function ip4_addr_to_int {
-    set -- ${1//./ }
-    echo $((${1}*256*256*256+${2}*256*256+${3}*256+${4}))
-  }
-
   parse_configuration_file
 
   local -A \
@@ -528,6 +559,9 @@ function command_create {
 
     info "Will create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
 
+    check_vm_params \
+    || continue
+
     esxi_ids=()
     # Preparing the esxi list where the virtual machine is located
     for vm_map in "${esxi_vm_map[@]}"
@@ -562,28 +596,6 @@ function command_create {
       skipping \
         "The virtual machine already exists on multiple hypervisors" \
         "${esxi_ids[@]/#/* }"
-      continue
-    fi
-
-    # Checking parameters values section
-    if [ ! -f "${params[local_iso_path]}" ]
-    then
-      skipping \
-        "The specified path '${params[local_iso_path]}' to ISO-file is not exists" \
-        "Please check it, correct and try again"
-      continue
-    elif [ "${params[vm_ipv4_address]}" = "${params[vm_ipv4_gateway]}" ]
-    then
-      skipping \
-        "The specified gateway '${params[vm_ipv4_gateway]}' cannot be equal to an address" \
-        "Please correct address or gateway address of virtual machine"
-      continue
-    elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
-           -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
-    then
-      skipping \
-        "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
-        "Please correct address with netmask or gateway address of virtual machine"
       continue
     fi
 
