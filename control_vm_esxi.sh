@@ -69,88 +69,9 @@ then
   exit 1
 fi
 
-# Function for pinging the remote host
 #
-#   Input: "${1}"   -  The pinging remote hostname
-#  Return: 0        -  The remote host is pinging
-#          another  -  The remote host is not pinging or error
+### Auxiliary functions
 #
-function ping_host {
-  ping \
-    -c 1 \
-    -w 1 \
-    "${1}" \
-  &>/dev/null
-}
-
-# Function to print 'SKIPPING' message
-# and writing the 'SKIPPING' message in vm_ids[@] array
-#
-#  Input: ${@}         - The message to print
-# Modify: ${vm_ids[@]} - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
-# Return: 0            - Always
-#
-function skipping {
-  _print skipping "${@}"
-
-  if [ ${#vm_ids[@]} -gt 0 ]
-  then
-    if [ -v vm_ids[${vm_id}] ]
-    then
-      vm_ids[${vm_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
-    else
-      internal \
-        "The virtual machine with id = '${vm_id}' not exists in \${vm_ids} array"
-    fi
-  fi
-
-  return 0
-}
-
-# Function to print the processed virtual machines status
-#
-#  Input: ${vm_id}      - The identifier the current processed virtual machine
-#                         for cases where the process is interrupted
-#         ${vm_ids[@]}  - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
-# Return: 0             - Always
-#
-function show_processed_vm_status {
-  local \
-    aborted_vm_id="${vm_id}"
-  local \
-    esxi_id="" \
-    esxi_name="" \
-    vm_id="" \
-    vm_name="" \
-    vm_status=""
-
-  if [ "${#vm_ids[@]}" -gt 0 ]
-  then
-    echo -e "${COLOR_NORMAL}"
-    echo "Processed virtual machines status:"
-    for vm_id in "${!vm_ids[@]}"
-    do
-      esxi_id="${my_all_params[${vm_id}.at]}"
-      esxi_name="${my_esxi_list[${esxi_id}]}"
-      vm_name="${my_vm_list[${vm_id}]}"
-
-      if [ "${vm_id}" = "${aborted_vm_id}" \
-           -a -z "${vm_ids[${vm_id}]}" ]
-      then
-        vm_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
-      else
-        vm_status="${vm_ids[${vm_id}]:-NOT PROCESSED}"
-      fi
-
-      printf -- \
-        "  * %-30b %b\n" \
-        "${COLOR_WHITE}${vm_name}${COLOR_NORMAL}/${esxi_name}" \
-        "${vm_status}"
-    done
-  fi
-
-  return 0
-}
 
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
@@ -313,6 +234,20 @@ function parse_vm_list {
   return 0
 }
 
+# Function for pinging the remote host
+#
+#   Input: "${1}"   -  The pinging remote hostname
+#  Return: 0        -  The remote host is pinging
+#          another  -  The remote host is not pinging or error
+#
+function ping_host {
+  ping \
+    -c 1 \
+    -w 1 \
+    "${1}" \
+  &>/dev/null
+}
+
 # Function to run remote command through SSH-connection
 #
 # Input:  ${1} - The command 'ssh' or 'scp'
@@ -438,6 +373,79 @@ function run_remote_command {
   fi
   return 0
 }
+
+# Function to print the processed virtual machines status
+#
+#  Input: ${vm_id}      - The identifier the current processed virtual machine
+#                         for cases where the process is interrupted
+#         ${vm_ids[@]}  - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
+# Return: 0             - Always
+#
+function show_processed_vm_status {
+  local \
+    aborted_vm_id="${vm_id}"
+  local \
+    esxi_id="" \
+    esxi_name="" \
+    vm_id="" \
+    vm_name="" \
+    vm_status=""
+
+  if [ "${#vm_ids[@]}" -gt 0 ]
+  then
+    echo -e "${COLOR_NORMAL}"
+    echo "Processed virtual machines status:"
+    for vm_id in "${!vm_ids[@]}"
+    do
+      esxi_id="${my_all_params[${vm_id}.at]}"
+      esxi_name="${my_esxi_list[${esxi_id}]}"
+      vm_name="${my_vm_list[${vm_id}]}"
+
+      if [ "${vm_id}" = "${aborted_vm_id}" \
+           -a -z "${vm_ids[${vm_id}]}" ]
+      then
+        vm_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
+      else
+        vm_status="${vm_ids[${vm_id}]:-NOT PROCESSED}"
+      fi
+
+      printf -- \
+        "  * %-30b %b\n" \
+        "${COLOR_WHITE}${vm_name}${COLOR_NORMAL}/${esxi_name}" \
+        "${vm_status}"
+    done
+  fi
+
+  return 0
+}
+
+# Function to print 'SKIPPING' message
+# and writing the 'SKIPPING' message in vm_ids[@] array
+#
+#  Input: ${@}         - The message to print
+# Modify: ${vm_ids[@]} - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
+# Return: 0            - Always
+#
+function skipping {
+  _print skipping "${@}"
+
+  if [ ${#vm_ids[@]} -gt 0 ]
+  then
+    if [ -v vm_ids[${vm_id}] ]
+    then
+      vm_ids[${vm_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
+    else
+      internal \
+        "The virtual machine with id = '${vm_id}' not exists in \${vm_ids} array"
+    fi
+  fi
+
+  return 0
+}
+
+#
+### Commands functions
+#
 
 function command_create {
   if [ -z "${1}" ]
