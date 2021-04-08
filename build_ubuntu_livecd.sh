@@ -29,8 +29,8 @@ set -o errtrace
 
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
 then
-  echo "!!! ERROR: Can't load a functions file (functions.sh.inc)"
-  echo "           Please check archive of this script or use 'git checkout --force' command if it cloned from git"
+  echo >&2 "!!! ERROR: Can't load a functions file (functions.sh.inc)"
+  echo >&2 "           Please check archive of this script or use 'git checkout --force' command if it cloned from git"
   exit 1
 fi
 

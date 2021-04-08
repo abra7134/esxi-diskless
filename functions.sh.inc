@@ -34,29 +34,27 @@ function _print {
       done
       ;;
     * )
-      {
-        local ident="!!! ${print_type^^}:"
-        local ident_length="${#ident}"
-        local error_message="${1}"
-        echo
-        printf -- "${COLOR_RED}%s${COLOR_NORMAL} %s\n" "${ident}" "${error_message}"
-        shift
-        for error_message in "${@}"; do
-          printf -- "%-${ident_length}s %s\n" "" "${error_message}"
-        done
-        echo
-      } >&2
+      local ident="!!! ${print_type^^}:"
+      local ident_length="${#ident}"
+      local error_message="${1}"
+      echo
+      printf -- "${COLOR_RED}%s${COLOR_NORMAL} %s\n" "${ident}" "${error_message}"
+      shift
+      for error_message in "${@}"; do
+        printf -- "%-${ident_length}s %s\n" "" "${error_message}"
+      done
+      echo
       ;;
   esac
 }
 
 function error {
-  _print error "${@}"
+  _print >&2 error "${@}"
   exit 1
 }
 
 function warning {
-  _print warning "${@}"
+  _print >&2 warning "${@}"
   exit 0
 }
 
@@ -65,7 +63,7 @@ function info {
 }
 
 function progress {
-  _print progress "${@}"
+  _print >&2 progress "${@}"
 }
 
 function internal {
@@ -91,13 +89,15 @@ function internal {
       "Happen, let a maintainer know or solve the problem yourself" \
       "" \
       "Stack trace:" \
-      "${stack_trace_message[@]}"
+      "${stack_trace_message[@]}" \
+    >&2
   else
     _print internal \
       "${@}" \
       "" \
       "Stack trace:" \
-      "${stack_trace_message[@]}"
+      "${stack_trace_message[@]}" \
+    >&2
   fi
 
   if [ -n "${post_command}" ]
@@ -259,7 +259,8 @@ function run_command {
   command_name="${1:-help}"
   if ! declare -F "command_${command_name}" >/dev/null
   then
-    error "Command '${command_name}' is not exists, please run '${my_name} help' or just '${my_name}' command"
+    error \
+      "Command '${command_name}' is not exists, please run '${my_name} help' or just '${my_name}' command"
   fi
 
   shift || true

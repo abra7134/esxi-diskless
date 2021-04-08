@@ -64,8 +64,8 @@ set -o errtrace
 
 if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
 then
-  echo "!!! ERROR: Can't load a functions file (functions.sh.inc)"
-  echo "           Please check archive of this script or use 'git checkout --force' command if it cloned from git"
+  echo >&2 "!!! ERROR: Can't load a functions file (functions.sh.inc)"
+  echo >&2 "           Please check archive of this script or use 'git checkout --force' command if it cloned from git"
   exit 1
 fi
 
@@ -430,8 +430,8 @@ function show_processed_vm_status {
 
   if [ "${#vm_ids[@]}" -gt 0 ]
   then
-    echo -e "${COLOR_NORMAL}"
-    echo "Processed virtual machines status:"
+    echo >&2 -e "${COLOR_NORMAL}"
+    echo >&2 "Processed virtual machines status:"
     for vm_id in "${!vm_ids[@]}"
     do
       esxi_id="${my_all_params[${vm_id}.at]}"
@@ -449,7 +449,9 @@ function show_processed_vm_status {
       printf -- \
         "  * %-30b %b\n" \
         "${COLOR_WHITE}${vm_name}${COLOR_NORMAL}/${esxi_name}" \
-        "${vm_status}"
+        "${vm_status}" \
+      >&2
+
     done
   fi
 
@@ -464,7 +466,7 @@ function show_processed_vm_status {
 # Return: 0            - Always
 #
 function skipping {
-  _print skipping "${@}"
+  _print >&2 skipping "${@}"
 
   if [ ${#vm_ids[@]} -gt 0 ]
   then
@@ -780,12 +782,13 @@ function command_create {
   remove_temp_dir
 
   show_processed_vm_status
-  echo
+  echo >&2
   printf \
     "Total: %d runned, %d runned and no pinging, %d skipped virtual machines" \
     ${runned_vms} \
     ${no_pinging_vms} \
-    $((${#vm_ids[@]}-runned_vms-no_pinging_vms))
+    $((${#vm_ids[@]}-runned_vms-no_pinging_vms)) \
+  >&2
 }
 
 function command_ls {
