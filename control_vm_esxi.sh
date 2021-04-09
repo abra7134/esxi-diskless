@@ -110,9 +110,141 @@ function check_vm_params {
   return 0
 }
 
+# Function to run simple operation on virtual machine
+#
+# Input:  ${1}        - The virtual machine operation: 'destroy', 'power on', 'power off' or 'power shutdown'
+#         ${2}        - The virtual machine identified on hypervisor
+#         ${3}        - The hypervisor identifier at ${my_esxi_list} array
+#         ${temp_dir} - The temporary directory to save commands outputs
+# Return:             - Status from run_remote_command() function
+#
+function esxi_vm_simple_command {
+  function esxi_get_vm_state {
+    local esxi_vm_id="${1}"
+
+    run_remote_command \
+    >"${vm_state_filepath}" \
+      "ssh" \
+      "${esxi_ssh_destination[@]}" \
+      "set -o pipefail" \
+      "vim-cmd vmsvc/power.getstate \"${esxi_vm_id}\" | awk 'NR == 2 { print \$0; }'" \
+      "|| Failed to get virtual machine power status on '${esxi_name}' hypervisor (vim-cmd vmsvc/power.getstatus)" \
+    || return 1
+
+    if ! \
+      vm_state=$(< "${vm_state_filepath}")
+    then
+      skipping \
+        "Failed to get virtual machine power status from '${vm_state_filepath}' file"
+      return 1
+    elif [    "${vm_state}" != "Powered on" \
+           -a "${vm_state}" != "Powered off" ]
+    then
+      skipping \
+        "Can't parse the virtual machine power status" \
+        "'${vm_state}'"
+      return 1
+    fi
+  }
+
+  local \
+    esxi_vm_operation="${1}" \
+    esxi_vm_id="${2}" \
+    esxi_id="${3}"
+
+  if [    "${esxi_vm_operation}" != "destroy" \
+       -a "${esxi_vm_operation}" != "power on" \
+       -a "${esxi_vm_operation}" != "power off" \
+       -a "${esxi_vm_operation}" != "power shutdown" ]
+  then
+    internal \
+      "The \${esxi_vm_operation} must be 'destroy', 'power on', 'power off' or 'power shutdown', but not '${esxi_vm_operation}'"
+  elif [ ! -v my_esxi_list[${esxi_id}] ]
+  then
+    internal \
+      "For hypervisor with \${esxi_id} = '${esxi_id}' don't exists at \${my_esxi_list} array"
+  fi
+
+  local \
+    esxi_name="" \
+    esxi_ssh_destination=() \
+    vm_state_filepath="${temp_dir}/vm_state" \
+    vm_state=""
+
+  esxi_name="${my_esxi_list[${esxi_id}]}"
+  esxi_ssh_destination=(
+    "${my_all_params[${esxi_id}.esxi_ssh_username]}"
+    "${my_all_params[${esxi_id}.esxi_ssh_password]}"
+    "${my_all_params[${esxi_id}.esxi_hostname]}"
+    "${my_all_params[${esxi_id}.esxi_ssh_port]}"
+  )
+
+  progress "${esxi_vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})"
+
+  esxi_get_vm_state \
+    "${esxi_vm_id}" \
+  || return 1
+
+  if [ "${vm_state}" = "Powered on" ]
+  then
+    if [ "${esxi_vm_operation}" = "power on" ]
+    then
+      echo "    The virtual machine is already powered on, skipping"
+      return 0
+    elif [ "${esxi_vm_operation}" = "destroy" ]
+    then
+      skipping \
+        "Can't destoy a virtual machine because it's powered on"
+      return 1
+    fi
+  elif [    "${esxi_vm_operation}" = "power off" \
+         -o "${esxi_vm_operation}" = "power shutdown" ]
+  then
+    echo "    The virtual machine is already powered off, skipping"
+    return 0
+  fi
+
+  run_remote_command \
+    "ssh" \
+    "${esxi_ssh_destination[@]}" \
+    "vim-cmd vmsvc/${esxi_vm_operation// /.} \"${esxi_vm_id}\" >/dev/null" \
+    "|| Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})" \
+  || return 1
+
+  if [ "${esxi_vm_operation}" != "destroy" ]
+  then
+    local attempts=10
+
+    if ! \
+      until
+        sleep 5;
+        esxi_get_vm_state \
+          "${esxi_vm_id}" \
+        || return 1;
+        [ ${attempts} -lt 1 ] \
+        || [ "${esxi_vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
+        || [ "${esxi_vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
+        || [ "${esxi_vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
+      do
+        echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
+        let attempts-=1
+      done
+    then
+      skipping \
+        "Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
+      return 1
+    fi
+
+    echo "    The virtual machine is ${esxi_vm_operation}, continue"
+  fi
+
+  return 0
+}
+
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
 #  Input: ${@}                  - The list esxi'es identifiers to
+#         ${temp_dir}           - The temporary directory to save commands outputs
 # Modify: ${esxi_vm_map[@]}     - Values - virtual machines identifiers in next format:
 #                                 {esxi_id}.{vm_id_on_esxi}.{vm_name}
 #         ${esxi_alive_list[@]} - Keys - esxi'es identifiers, Values - "yes" string
@@ -125,7 +257,7 @@ function get_esxi_vm_map {
     esxi_id="" \
     esxi_name="" \
     vm_id="" \
-    vm_map=""
+    vm_map_filepath="${temp_dir}/vm_map"
 
   esxi_vm_map=()
   esxi_alive_list=()
@@ -137,8 +269,8 @@ function get_esxi_vm_map {
     get_params "${esxi_id}"
 
     if ! \
-      vm_map=$(
         run_remote_command \
+        >"${vm_map_filepath}" \
           "ssh" \
           "${params[esxi_ssh_username]}" \
           "${params[esxi_ssh_password]}" \
@@ -153,7 +285,6 @@ function get_esxi_vm_map {
 EOF
 " \
           "|| Failed to get virtual machine ID on hypervisor (awk)"
-      )
     then
       if [ "${my_flags[skip_availability_check]}" = "yes" ]
       then
@@ -187,9 +318,7 @@ EOF
           "Let a maintainer know or solve the problem yourself"
       fi
     done \
-    <<EOF
-${vm_map}
-EOF
+    <"${vm_map_filepath}"
   done
 
   return 0
@@ -371,8 +500,7 @@ function run_remote_command {
     error_codes_descriptions[1]="Failed to copy file to remote server"
   else
     internal \
-      "The wrong sshpass_command = ${sshpass_command}" \
-      "Support only 'ssh' and 'scp' values, please fix it"
+      "The '\${sshpass_command}' must be 'ssh' or 'scp', but no '${sshpass_command}'"
   fi
 
   if \
@@ -466,41 +594,32 @@ function show_processed_vm_status {
 # Return: 0            - Always
 #
 function skipping {
-  _print >&2 skipping "${@}"
-
-  if [ ${#vm_ids[@]} -gt 0 ]
+  if [ -n "${1}" ]
   then
-    if [ -v vm_ids[${vm_id}] ]
+    _print >&2 skipping "${@}"
+
+    if [ ${#vm_ids[@]} -gt 0 ]
     then
-      vm_ids[${vm_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
-    else
-      internal \
-        "The virtual machine with id = '${vm_id}' not exists in \${vm_ids} array"
+      if [ -v vm_ids[${vm_id}] ]
+      then
+        vm_ids[${vm_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
+      fi
     fi
   fi
 
   return 0
 }
 
-#
-### Commands functions
-#
+function vm_create_or_migrate {
+  local \
+    vm_operation="${1}"
+  shift
 
-function command_create {
-  if [ -z "${1}" ]
+  if [    "${vm_operation}" != "create" \
+       -a "${vm_operation}" != "migrate" ]
   then
-    warning \
-      "Please specify a virtual machine name or names to be created and runned" \
-      "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
-      "" \
-      "Options: -i  Do not stop the script if any of hypervisors are not available" \
-      "         -n  Skip virtual machine availability check on all hypervisors" \
-      "" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  elif [ "${1}" = "description" ]
-  then
-    echo "Create and start virtual machine(s)"
-    return 0
+    internal \
+      "The \${vm_operation} must be 'create' or 'migrate', but not '${vm_operation}'"
   fi
 
   parse_configuration_file
@@ -512,6 +631,12 @@ function command_create {
   parse_vm_list "${@}"
   check_dependencies
 
+  if [ "${vm_operation}" = "migrate" ]
+  then
+    # This flag is not necessary if 'migrate' operation runned
+    my_flags[skip_availability_check]=""
+  fi
+
   local -A \
     esxi_alive_list=()
   local \
@@ -522,34 +647,42 @@ function command_create {
     info "Will prepare a virtual machines map on necessary hypervisors only (specified '-n' key)"
     get_esxi_vm_map "${!esxi_ids[@]}"
   else
-    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
+    if [ "${vm_operation}" = "migrate" ]
+    then
+      info "Will prepare a virtual machines map on all hypervisors"
+    else
+      info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
+    fi
     get_esxi_vm_map "${!my_esxi_list[@]}"
   fi
-  unset esxi_ids
 
   local -A \
+    esxi_old_names=() \
     params=() \
     vmx_params=()
   local \
     attempts=0 \
+    no_pinging_vms=0 \
+    runned_vms=0
+  local \
     esxi_id="" \
-    esxi_ids=() \
+    esxi_old_id="" \
+    esxi_old_vm_id="" \
     esxi_iso_dir="" \
     esxi_iso_path="" \
     esxi_name="" \
     esxi_ssh_destination=() \
-    no_pinging_vms=0 \
+    esxi_vm_id="" \
     param="" \
-    runned_vms=0 \
-    temp_dir="" \
     temp_file="" \
     vm_esxi_dir="" \
     vm_id="" \
+    vm_id_filepath="" \
     vm_iso_filename="" \
     vm_name="" \
-    vmx_file_path=""
+    vmx_filepath=""
 
-  temp_dir=$(mktemp -d)
+  vm_id_filepath="${temp_dir}/vm_id"
 
   for vm_id in "${!vm_ids[@]}"
   do
@@ -559,23 +692,10 @@ function command_create {
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
+    info "Will ${vm_operation} a '${vm_name}' (${params[vm_ipv4_address]}) on/to '${esxi_name}' (${params[esxi_hostname]})"
 
     check_vm_params \
     || continue
-
-    esxi_ids=()
-    # Preparing the esxi list where the virtual machine is located
-    for vm_map in "${esxi_vm_map[@]}"
-    do
-      if [[ "${vm_map}" =~ ^([[:digit:]]+)\.([[:digit:]]+)\."${vm_name}"$ ]]
-      then
-        esxi_id="${BASH_REMATCH[1]}"
-        esxi_ids+=(
-          "${my_esxi_list[${esxi_id}]}"
-        )
-      fi
-    done
 
     # Checking the hypervisor liveness
     if [ -v ${esxi_alive_list[${esxi_id}]} ]
@@ -585,19 +705,44 @@ function command_create {
       continue
     fi
 
+    esxi_old_names=()
+    # Preparing the esxi list where the virtual machine is located
+    for vm_map in "${esxi_vm_map[@]}"
+    do
+      if [[ "${vm_map}" =~ ^([[:digit:]]+)\.([[:digit:]]+)\."${vm_name}"$ ]]
+      then
+        esxi_old_id="${BASH_REMATCH[1]}"
+        esxi_old_names[${esxi_old_id}]="${my_esxi_list[${esxi_old_id}]} (${my_all_params[${esxi_old_id}.esxi_hostname]})"
+        esxi_old_vm_id="${BASH_REMATCH[2]}"
+      fi
+    done
+
     # Checking existance the virtual machine on another or this hypervisors
-    if [    ${#esxi_ids[@]} -eq 1 \
-         -a "${esxi_ids[0]}" = "${esxi_name}" ]
+    if [ -v esxi_old_names[${esxi_id}] ]
     then
       skipping \
         "The virtual machine already exists on hypervisor"
       continue
-    elif [ ${#esxi_ids[@]} -gt 0 \
-           -a -z "${skip_availability_check}" ]
+    elif [ "${vm_operation}" = "migrate" ]
+    then
+      if [ ${#esxi_old_names[@]} -lt 1 ]
+      then
+        skipping \
+          "No old migrable virtual machine location found" \
+          "Use 'create' command for this operation"
+        continue
+      elif [ "${#esxi_old_names[@]}" -gt 1 ]
+      then
+        skipping \
+          "The migrable virtual machine exists on more than one hypervisors" \
+          "${esxi_old_names[@]/#/* }"
+        continue
+      fi
+    elif [ ${#esxi_old_names[@]} -gt 0 ]
     then
       skipping \
-        "The virtual machine already exists on multiple hypervisors" \
-        "${esxi_ids[@]/#/* }"
+        "The virtual machine already exists on another hypervisor(s)" \
+        "${esxi_old_names[@]/#/* }"
       continue
     fi
 
@@ -612,7 +757,7 @@ function command_create {
     esxi_iso_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso"
     esxi_iso_path="${esxi_iso_dir}/${vm_iso_filename}"
 
-    progress "Checking existance the ISO image file on hypervisor (test -f)"
+    progress "Checking existance the ISO image file on '${esxi_name}' hypervisor (test -f)"
     run_remote_command \
       "ssh" \
       "${esxi_ssh_destination[@]}" \
@@ -626,7 +771,7 @@ function command_create {
         "${esxi_ssh_destination[@]}" \
         "test -f \"${esxi_iso_path}\""
     then
-      progress "Upload the ISO image file to hypervisor (scp)"
+      progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
       run_remote_command \
         "scp" \
         "${esxi_ssh_destination[@]}" \
@@ -704,18 +849,18 @@ function command_create {
       [virtualhw.version]="11"
       [vmci0.present]="TRUE"
     )
-    vmx_file_path="${temp_dir}/${vm_name}.vmx"
+    vmx_filepath="${temp_dir}/${vm_name}.vmx"
     for param in "${!vmx_params[@]}"
     do
       echo "${param} = \"${vmx_params[${param}]}\""
     done \
-    > "${vmx_file_path}.notsorted"
+    > "${vmx_filepath}.notsorted"
 
     sort \
-      "${vmx_file_path}.notsorted" \
-    > "${vmx_file_path}"
+      "${vmx_filepath}.notsorted" \
+    > "${vmx_filepath}"
 
-    progress "Upload a virtual machine configuration to hypervisor (scp)"
+    progress "Upload a virtual machine configuration to '${esxi_name}' hypervisor (scp)"
     run_remote_command \
       "ssh" \
       "${esxi_ssh_destination[@]}" \
@@ -728,29 +873,63 @@ function command_create {
     run_remote_command \
       "scp" \
       "${esxi_ssh_destination[@]}" \
-      "${vmx_file_path}" \
+      "${vmx_filepath}" \
       "${vm_esxi_dir}/${vm_name}.vmx" \
     || continue
 
-    progress "Register the virtual machine configuration on hypervisor (vim-cmd solo/registervm)"
+    progress "Register the virtual machine configuration on '${esxi_name}' hypervisor (vim-cmd solo/registervm)"
     run_remote_command \
+    >"${vm_id_filepath}" \
       "ssh" \
       "${esxi_ssh_destination[@]}" \
-      "vim-cmd solo/registervm \"${vm_esxi_dir}/${vm_name}.vmx\" \"${vm_name}\" >./vm_id" \
+      "vim-cmd solo/registervm \"${vm_esxi_dir}/${vm_name}.vmx\" \"${vm_name}\"" \
       "|| Failed to register a virtual machine on hypervisor" \
     || continue
 
-    progress "Power on the virtual machine on hypervisor (vim-cmd vmsvc/power.on)"
-    run_remote_command \
-      "ssh" \
-      "${esxi_ssh_destination[@]}" \
-      "vm_id=\$(cat ./vm_id)" \
-      "|| Cannot get the 'vm_id' from the special temporary file ./vm_id from previous step" \
-      "vim-cmd vmsvc/power.on \"\${vm_id}\" >/dev/null" \
-      "|| Failed to power on machine on hypervisor (vim-cmd vmsvc/power.on)" \
-      "rm ./vm_id" \
-      "|| Failed to remove the special temporary file ./vm_id, please do it manually" \
-    || continue
+    if ! \
+      esxi_vm_id=$(< "${vm_id_filepath}")
+    then
+      skipping \
+        "Failed to get virtual machine identifier from '${vm_id_filepath}' file"
+      continue
+    elif [[ ! "${esxi_vm_id}" =~ ^[[:digit:]]+$ ]]
+    then
+      skipping \
+        "The unknown the virtual machine identifier = '${esxi_vm_id}' getted from hypervisor" \
+        "It must be a just number"
+      continue
+    fi
+
+    if [ "${vm_operation}" = "migrate" ]
+    then
+      esxi_vm_simple_command \
+        "power shutdown" \
+        "${esxi_old_vm_id}" \
+        "${esxi_old_id}" \
+      || continue
+    fi
+
+    if ! \
+      esxi_vm_simple_command \
+        "power on" \
+        "${esxi_vm_id}" \
+        "${esxi_id}"
+    then
+      if [ "${vm_operation}" = "migrate" ]
+      then
+        if ! \
+          esxi_vm_simple_command \
+            "power on" \
+            "${esxi_old_vm_id}" \
+            "${esxi_old_id}"
+        then
+          vm_ids[${vm_id}]="${COLOR_RED}NO MIGRATED/REVERT ERROR/ABORTED${COLOR_NORMAL} (see errors above)"
+          break
+        fi
+      fi
+      vm_ids[${vm_id}]="${COLOR_YELLOW}NO MIGRATED/REVERTED${COLOR_NORMAL}"
+      continue
+    fi
 
     progress "Waiting the network availability of the virtual machine (ping)"
     let attempts=10
@@ -768,27 +947,101 @@ function command_create {
         "No connectivity to virtual machine" \
         "Please verify that the virtual machine is up manually"
 
+      if [ "${vm_operation}" = "migrate" ]
+      then
+        if ! \
+          esxi_vm_simple_command \
+            "power shutdown" \
+            "${esxi_vm_id}" \
+            "${esxi_id}"
+        then
+          vm_ids[${vm_id}]="${COLOR_RED}NO MIGRATED/REVERT ERROR/ABORTED${COLOR_NORMAL} (see errors above)"
+          break
+        fi
+
+        if ! \
+          esxi_vm_simple_command \
+            "power on" \
+            "${esxi_old_vm_id}" \
+            "${esxi_old_id}"
+        then
+          vm_ids[${vm_id}]="${COLOR_RED}NO MIGRATED/REVERT ERROR/ABORTED${COLOR_NORMAL} (see errors above)"
+          break
+        fi
+
+        vm_ids[${vm_id}]="${COLOR_YELLOW}NO MIGRATED/REVERTED${COLOR_NORMAL}"
+      else
+        vm_ids[${vm_id}]="${COLOR_YELLOW}CREATED/NO PINGING${COLOR_NORMAL}"
+      fi
+
       let no_pinging_vms+=1
-      vm_ids[${vm_id}]="${COLOR_YELLOW}RUNNED/NO PINGING${COLOR_NORMAL}"
       continue
     fi
 
     echo "    The virtual machine is alive, continue"
+
+    vm_ids[${vm_id}]="${COLOR_GREEN}${vm_operation^^}D/PINGED${COLOR_NORMAL}"
     let runned_vms+=1
-    vm_ids[${vm_id}]="${COLOR_GREEN}RUNNED/PINGED${COLOR_NORMAL}"
+
+    if [ "${vm_operation}" = "migrate" ]
+    then
+      vm_ids[${vm_id}]+=" (from '${my_esxi_list[${esxi_old_id}]}' hypervisor)"
+      esxi_vm_simple_command \
+        "destroy" \
+        "${esxi_old_vm_id}" \
+        "${esxi_old_id}" \
+      || break
+    fi
 
   done
 
   remove_temp_dir
 
   show_processed_vm_status
+
+  if [ "${vm_operation}" = "migrate" ]
+  then
+    local \
+      total_message="Total: %d migrated, %d no migrated but reverted, %d skipped or aborted virtual machines"
+  else
+    local \
+      total_message="Total: %d created, %d created but no pinging, %d skipped virtual machines"
+  fi
+
   echo >&2
-  printf \
-    "Total: %d runned, %d runned and no pinging, %d skipped virtual machines" \
+  printf "${total_message}" \
     ${runned_vms} \
     ${no_pinging_vms} \
     $((${#vm_ids[@]}-runned_vms-no_pinging_vms)) \
   >&2
+}
+
+#
+### Commands functions
+#
+
+function command_create {
+  if [ -z "${1}" ]
+  then
+    warning \
+      "Please specify a virtual machine name or names to be created and runned" \
+      "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
+      "" \
+      "Options: -i  Do not stop the script if any of hypervisors are not available" \
+      "         -n  Skip virtual machine availability check on all hypervisors" \
+      "" \
+      "Available names can be viewed using the '${my_name} ls' command"
+  elif [ "${1}" = "description" ]
+  then
+    echo "Create and start virtual machine(s)"
+    return 0
+  fi
+
+  vm_create_or_migrate \
+    "create" \
+    "${@}"
+
+  return 0
 }
 
 function command_ls {
@@ -905,6 +1158,29 @@ function command_ls {
   done
   echo "Total: ${#my_esxi_list[@]} esxi instances and ${#my_vm_list[@]} virtual machines on them"
   exit 0
+}
+
+function command_migrate {
+  if [ -z "${1}" ]
+  then
+    warning \
+      "Please specify a virtual machine name or names to be migrated" \
+      "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
+      "" \
+      "Options: -i  Do not stop the script if any of hypervisors are not available" \
+      "" \
+      "Available names can be viewed using the '${my_name} ls' command"
+  elif [ "${1}" = "description" ]
+  then
+    echo "Migrate virtual machine(s) to another hypervisor(s)"
+    return 0
+  fi
+
+  vm_create_or_migrate \
+    "migrate" \
+    "${@}"
+
+  return 0
 }
 
 function parse_configuration_file {
@@ -1288,5 +1564,7 @@ function trap_sigint {
 
 trap "post_command=remove_temp_dir internal;" ERR
 trap "trap_sigint;" SIGINT
+
+temp_dir=$(mktemp -d)
 
 run_command "${@}"
