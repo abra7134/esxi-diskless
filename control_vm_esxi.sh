@@ -369,6 +369,10 @@ function parse_vm_list {
   do
     case "${vm_name}"
     in
+      "-d" )
+        my_flags[destroy_on_another]="yes"
+        continue
+        ;;
       "-i" )
         my_flags[ignore_unavailable]="yes"
         continue
@@ -610,16 +614,26 @@ function skipping {
   return 0
 }
 
-function vm_create_or_migrate {
-  local \
-    vm_operation="${1}"
-  shift
+#
+### Commands functions
+#
 
-  if [    "${vm_operation}" != "create" \
-       -a "${vm_operation}" != "migrate" ]
+function command_create {
+  if [ -z "${1}" ]
   then
-    internal \
-      "The \${vm_operation} must be 'create' or 'migrate', but not '${vm_operation}'"
+    warning \
+      "Please specify a virtual machine name or names to be created and runned" \
+      "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
+      "" \
+      "Options: -d  Destroy the same virtual machine on another hypervisor (migration analogue)" \
+      "         -i  Do not stop the script if any of hypervisors are not available" \
+      "         -n  Skip virtual machine availability check on all hypervisors" \
+      "" \
+      "Available names can be viewed using the '${my_name} ls' command"
+  elif [ "${1}" = "description" ]
+  then
+    echo "Create and start virtual machine(s)"
+    return 0
   fi
 
   parse_configuration_file
@@ -631,10 +645,12 @@ function vm_create_or_migrate {
   parse_vm_list "${@}"
   check_dependencies
 
-  if [ "${vm_operation}" = "migrate" ]
+  if [    "${my_flags[destroy_on_another]}" = "yes" \
+       -a "${my_flags[skip_availability_check]}" = "yes" ]
   then
-    # This flag is not necessary if 'migrate' operation runned
-    my_flags[skip_availability_check]=""
+    warning \
+      "Key '-d' is not compatible with key '-n'" \
+      "because it's necessary to search for the virtual machine being destroyed on all hypervisors, and not on specific ones"
   fi
 
   local -A \
@@ -647,7 +663,7 @@ function vm_create_or_migrate {
     info "Will prepare a virtual machines map on necessary hypervisors only (specified '-n' key)"
     get_esxi_vm_map "${!esxi_ids[@]}"
   else
-    if [ "${vm_operation}" = "migrate" ]
+    if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
       info "Will prepare a virtual machines map on all hypervisors"
     else
@@ -692,7 +708,7 @@ function vm_create_or_migrate {
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will ${vm_operation} a '${vm_name}' (${params[vm_ipv4_address]}) on/to '${esxi_name}' (${params[esxi_hostname]})"
+    info "Will create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
 
     check_vm_params \
     || continue
@@ -723,18 +739,17 @@ function vm_create_or_migrate {
       skipping \
         "The virtual machine already exists on hypervisor"
       continue
-    elif [ "${vm_operation}" = "migrate" ]
+    elif [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
       if [ ${#esxi_old_names[@]} -lt 1 ]
       then
-        skipping \
-          "No old migrable virtual machine location found" \
-          "Use 'create' command for this operation"
-        continue
+        # If a virtual machine is not found anywhere, then you do not need to destroy it
+        my_flags[destroy_on_another]=""
       elif [ "${#esxi_old_names[@]}" -gt 1 ]
       then
         skipping \
-          "The migrable virtual machine exists on more than one hypervisors" \
+          "The virtual machine exists on more than one hypervisors" \
+          "(That using the key '-d' gives the uncertainty of which virtual machine to destroy)"
           "${esxi_old_names[@]/#/* }"
         continue
       fi
@@ -900,7 +915,7 @@ function vm_create_or_migrate {
       continue
     fi
 
-    if [ "${vm_operation}" = "migrate" ]
+    if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
       esxi_vm_simple_command \
         "power shutdown" \
@@ -915,7 +930,7 @@ function vm_create_or_migrate {
         "${esxi_vm_id}" \
         "${esxi_id}"
     then
-      if [ "${vm_operation}" = "migrate" ]
+      if [ "${my_flags[destroy_on_another]}" = "yes" ]
       then
         if ! \
           esxi_vm_simple_command \
@@ -923,11 +938,10 @@ function vm_create_or_migrate {
             "${esxi_old_vm_id}" \
             "${esxi_old_id}"
         then
-          vm_ids[${vm_id}]="${COLOR_RED}NO MIGRATED/REVERT ERROR/ABORTED${COLOR_NORMAL} (see errors above)"
+          vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see details above)"
           break
         fi
       fi
-      vm_ids[${vm_id}]="${COLOR_YELLOW}NO MIGRATED/REVERTED${COLOR_NORMAL}"
       continue
     fi
 
@@ -947,7 +961,7 @@ function vm_create_or_migrate {
         "No connectivity to virtual machine" \
         "Please verify that the virtual machine is up manually"
 
-      if [ "${vm_operation}" = "migrate" ]
+      if [ "${my_flags[destroy_on_another]}" = "yes" ]
       then
         if ! \
           esxi_vm_simple_command \
@@ -955,7 +969,7 @@ function vm_create_or_migrate {
             "${esxi_vm_id}" \
             "${esxi_id}"
         then
-          vm_ids[${vm_id}]="${COLOR_RED}NO MIGRATED/REVERT ERROR/ABORTED${COLOR_NORMAL} (see errors above)"
+          vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to shutdown virtual machine, see details above)"
           break
         fi
 
@@ -965,11 +979,11 @@ function vm_create_or_migrate {
             "${esxi_old_vm_id}" \
             "${esxi_old_id}"
         then
-          vm_ids[${vm_id}]="${COLOR_RED}NO MIGRATED/REVERT ERROR/ABORTED${COLOR_NORMAL} (see errors above)"
+          vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see deatils above)"
           break
         fi
 
-        vm_ids[${vm_id}]="${COLOR_YELLOW}NO MIGRATED/REVERTED${COLOR_NORMAL}"
+        vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (see details above)"
       else
         vm_ids[${vm_id}]="${COLOR_YELLOW}CREATED/NO PINGING${COLOR_NORMAL}"
       fi
@@ -980,17 +994,22 @@ function vm_create_or_migrate {
 
     echo "    The virtual machine is alive, continue"
 
-    vm_ids[${vm_id}]="${COLOR_GREEN}${vm_operation^^}D/PINGED${COLOR_NORMAL}"
+    vm_ids[${vm_id}]="${COLOR_GREEN}CREATED/PINGED${COLOR_NORMAL}"
     let runned_vms+=1
 
-    if [ "${vm_operation}" = "migrate" ]
+    if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
-      vm_ids[${vm_id}]+=" (from '${my_esxi_list[${esxi_old_id}]}' hypervisor)"
-      esxi_vm_simple_command \
-        "destroy" \
-        "${esxi_old_vm_id}" \
-        "${esxi_old_id}" \
-      || break
+      if ! \
+        esxi_vm_simple_command \
+          "destroy" \
+          "${esxi_old_vm_id}" \
+          "${esxi_old_id}"
+      then
+        vm_ids[${vm_id}]="${COLOR_YELLOW}CREATED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
+        continue
+      fi
+
+      vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_esxi_list[${esxi_old_id}]}' hypervisor)"
     fi
 
   done
@@ -999,49 +1018,12 @@ function vm_create_or_migrate {
 
   show_processed_vm_status
 
-  if [ "${vm_operation}" = "migrate" ]
-  then
-    local \
-      total_message="Total: %d migrated, %d no migrated but reverted, %d skipped or aborted virtual machines"
-  else
-    local \
-      total_message="Total: %d created, %d created but no pinging, %d skipped virtual machines"
-  fi
-
   echo >&2
-  printf "${total_message}" \
+  printf "Total: %d created, %d created but no pinging, %d skipped virtual machines" \
     ${runned_vms} \
     ${no_pinging_vms} \
     $((${#vm_ids[@]}-runned_vms-no_pinging_vms)) \
   >&2
-}
-
-#
-### Commands functions
-#
-
-function command_create {
-  if [ -z "${1}" ]
-  then
-    warning \
-      "Please specify a virtual machine name or names to be created and runned" \
-      "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
-      "" \
-      "Options: -i  Do not stop the script if any of hypervisors are not available" \
-      "         -n  Skip virtual machine availability check on all hypervisors" \
-      "" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  elif [ "${1}" = "description" ]
-  then
-    echo "Create and start virtual machine(s)"
-    return 0
-  fi
-
-  vm_create_or_migrate \
-    "create" \
-    "${@}"
-
-  return 0
 }
 
 function command_ls {
@@ -1158,29 +1140,6 @@ function command_ls {
   done
   echo "Total: ${#my_esxi_list[@]} esxi instances and ${#my_vm_list[@]} virtual machines on them"
   exit 0
-}
-
-function command_migrate {
-  if [ -z "${1}" ]
-  then
-    warning \
-      "Please specify a virtual machine name or names to be migrated" \
-      "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
-      "" \
-      "Options: -i  Do not stop the script if any of hypervisors are not available" \
-      "" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  elif [ "${1}" = "description" ]
-  then
-    echo "Migrate virtual machine(s) to another hypervisor(s)"
-    return 0
-  fi
-
-  vm_create_or_migrate \
-    "migrate" \
-    "${@}"
-
-  return 0
 }
 
 function parse_configuration_file {
