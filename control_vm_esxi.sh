@@ -3,7 +3,7 @@
 # Script for simply control (create/start/stop/remove) of virtual machines on ESXi
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_DEPENDENCIES=("scp" "sort" "ssh" "sshpass" "ping")
+MY_DEPENDENCIES=("mktemp" "scp" "sort" "ssh" "sshpass" "ping")
 MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("ESXI_CONFIG_PATH")
 MY_VERSION="2.210409"
@@ -636,7 +636,8 @@ function command_create {
     return 0
   fi
 
-  parse_configuration_file
+  parse_ini_file \
+    "${ESXI_CONFIG_PATH}"
 
   local -A \
     esxi_ids=() \
@@ -1048,7 +1049,8 @@ function command_ls {
     fi
   }
 
-  parse_configuration_file
+  parse_ini_file \
+    "${ESXI_CONFIG_PATH}"
   check_dependencies
 
   if [ ${#my_esxi_list[@]} -lt 1 ]
@@ -1142,7 +1144,20 @@ function command_ls {
   exit 0
 }
 
-function parse_configuration_file {
+# The function to parse configuration file
+#
+#  Input: ${1}                  - The path to configuration INI-file
+# Modify: ${my_all_params}      - Keys - parameter name with identifier of build in next format:
+#                                 {build_identifier}.{parameter_name}
+#                                 Values - value of parameter
+#         ${my_builds_list[@]}  - Keys - identifier of build (actual sequence number)
+#                                 Values - name of build from configuration file
+# Return: 0                     - The parse complete without errors
+#
+function parse_ini_file {
+  local \
+    config_path="${1}"
+
   function check_param_value {
     local \
       param="${1}" \
@@ -1214,33 +1229,16 @@ function parse_configuration_file {
 
   function error_config {
     error \
-      "Configuration file (${ESXI_CONFIG_PATH}) at line ${config_lineno}:" \
+      "Configuration file (${config_path}) at line ${config_lineno}:" \
       "> ${s}" \
       "" \
       "${@}"
   }
 
-  # The function for find duplicates in list
-  function check_duplicates {
-    local \
-      find_item="${1}" \
-      i
-
-    shift
-    for i in "${@}"
-    do
-      if [ "${i}" = "${find_item}" ]
-      then
-        return 0
-      fi
-    done
-    return 1
-  }
-
-  if [ ! -s "${ESXI_CONFIG_PATH}" ]
+  if [ ! -s "${config_path}" ]
   then
     error \
-      "Can't load a configuration file (${ESXI_CONFIG_PATH})" \
+      "Can't load a configuration file (${config_path})" \
       "Please check of it existance and try again"
   fi
 
@@ -1338,7 +1336,7 @@ function parse_configuration_file {
         in
           "esxi_list" )
             if \
-              check_duplicates \
+              finded_duplicate \
               "${config_resource_name}" \
               "${my_esxi_list[@]}"
             then
@@ -1351,7 +1349,7 @@ function parse_configuration_file {
             ;;
           "vm_list" )
             if \
-              check_duplicates \
+              finded_duplicate \
               "${config_resource_name}" \
               "${my_vm_list[@]}"
             then
@@ -1389,7 +1387,7 @@ function parse_configuration_file {
         then
           error_config \
             "The unknown INI-parameter name '${config_parameter}'" \
-            "Please correct (correct names specified at ${ESXI_CONFIG_PATH}.example) and try again"
+            "Please correct (correct names specified at ${config_path}.example) and try again"
         elif [[    ${resource_id} -gt 0
                 && " ${!my_all_params[@]} " =~ " ${resource_id}.${config_parameter} " ]]
         then
@@ -1446,7 +1444,7 @@ function parse_configuration_file {
         "Cannot parse a string, please correct and try again"
     fi
   done \
-  < "${ESXI_CONFIG_PATH}"
+  < "${config_path}"
 
   # Fill in all missing fields in [esxi_list] and [vm_list] sections from default values with some checks
   for config_parameter in "${!my_all_params[@]}"
@@ -1466,7 +1464,7 @@ function parse_configuration_file {
           then
             error \
               "Problem in configuration file:" \
-              "The empty value of required '${config_parameter}' parameter at '${my_esxi_list[$esxi_id]}' esxi instance definition" \
+              "The empty value of required '${config_parameter}' parameter at '${my_esxi_list[${esxi_id}]}' esxi instance definition" \
               "Please fill the value of parameter and try again"
           fi
 

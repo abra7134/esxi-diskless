@@ -205,6 +205,23 @@ function command_help {
   exit 0
 }
 
+function finded_duplicate {
+  local \
+    find_item="${1}" \
+    i
+
+  shift
+  for i in "${@}"
+  do
+    if [ "${i}" = "${find_item}" ]
+    then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 function init_colors {
   # This simply check tty or not is used
   if tty --silent

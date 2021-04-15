@@ -1,0 +1,26 @@
+# Main configuration file with list and options for all ISO images builds
+# file format - classic INI format
+#
+# The entire configuration file consists of several sections,
+# each of which describes the settings for a specific ISO image build
+#
+# For example:
+#
+# [xenial-air]                               # The INI-section with build name
+# base_layer="ubuntu-xenial-amd64-minbase"   # The base layer in which the command specified
+#                                            # in 'run_from_repo' will be run and a finished ISO-image will be builded
+# repo_url="git@server:user/repo_name.git"   # The URL of repository with deploy script and required files
+# repo_clone_to="/"                          # Clone repository to specified path in resulted file tree
+# repo_checkout="master"                     # The branch/tag/commit of repository to used for checkout
+# run_from_repo="/deploy.sh"                 # The path in repository of deploy script to be runned
+#
+# The 'base_layer' parameter the only required, other parameters optional
+# If you do not specify a 'repo_url' parameter, the build is based on the base layer only
+#
+
+###
+### The following are real sections so that you can simply rename the .example file and use it right away
+###
+
+[ubuntu-xenial-amd64-minbase]
+base_layer="ubuntu-xenial-amd64-minbase"
