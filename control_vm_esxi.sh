@@ -347,6 +347,376 @@ function get_params {
   return 0
 }
 
+# The function to parse configuration file
+#
+#  Input: ${1}                  - The path to configuration INI-file
+# Modify: ${my_all_params}      - Keys - parameter name with identifier of build in next format:
+#                                 {build_identifier}.{parameter_name}
+#                                 Values - value of parameter
+#         ${my_builds_list[@]}  - Keys - identifier of build (actual sequence number)
+#                                 Values - name of build from configuration file
+# Return: 0                     - The parse complete without errors
+#
+function parse_ini_file {
+  local \
+    config_path="${1}"
+
+  function check_param_value {
+    local \
+      param="${1}" \
+      value="${2}" \
+      error=""
+
+    case "${param}"
+    in
+      "esxi_hostname"|"esxi_ssh_username"|"vm_ssh_username" )
+        [[ "${value}" =~ ^[[:alnum:]_\.\-]+$ ]] \
+        || \
+          error="it must consist of characters (in regex notation): [[:alnum:]_.-]"
+        ;;
+      "esxi_ssh_port"|"vm_ssh_port" )
+        [[    "${value}" =~ ^[[:digit:]]+$
+           && "${value}" -ge 0
+           && "${value}" -le 65535 ]] \
+        || \
+          error="it must be a number from 0 to 65535"
+        ;;
+      "esxi_ssh_password"|"vm_ssh_password" )
+        ;;
+      "vm_ipv4_address"|"vm_ipv4_gateway" )
+        [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
+        || \
+          error="it must be the correct IPv4 address (in x.x.x.x format)"
+        ;;
+      "vm_ipv4_netmask" )
+        [[    "${value}" =~ ^255\.255\.255\.(255|254|252|248|240|224|192|128|0)$
+           || "${value}" =~ ^255\.255\.(255|254|252|248|240|224|192|128|0)\.0$
+           || "${value}" =~ ^255\.(255|254|252|248|240|224|192|128|0)\.0\.0$
+           || "${value}" =~ ^(255|254|252|248|240|224|192|128|0)\.0\.0\.0$ ]] \
+        || \
+          error="it must be the correct IPv4 netmask (in x.x.x.x format)"
+        ;;
+      "vm_memory_mb" )
+        [[    "${value}" =~ ^[[:digit:]]+$
+           && "${value}" -gt 1024
+           && "${value}" -le 32768 ]] \
+        || \
+          error="it must be a number from 1024 to 32768"
+        ;;
+      "vm_timezone" )
+        [[ "${value}/" =~ ^([[:alnum:]_\+\-]+/)+$ ]] \
+        || \
+          error="it must consist of characters (in regex notation): [[:alnum:]_-+/]"
+        ;;
+      "vm_vcpus" )
+        [[    "${value}" =~ ^[[:digit:]]+$
+           && "${value}" -gt 0
+           && "${value}" -le 8 ]] \
+        || \
+          error="it must be a number from 1 to 8"
+        ;;
+      * )
+        [ -n "${value}" ] \
+        || \
+          error="it must be not empty"
+        ;;
+    esac
+
+    if [ -n "${error}" ]
+    then
+      error_config \
+        "The wrong value of '${param}' parameter: ${error}" \
+        "Please fix it and try again"
+    fi
+  }
+
+  function error_config {
+    error \
+      "Configuration file (${config_path}) at line ${config_lineno}:" \
+      "> ${s}" \
+      "" \
+      "${@}"
+  }
+
+  if [ ! -s "${config_path}" ]
+  then
+    error \
+      "Can't load a configuration file (${config_path})" \
+      "Please check of it existance and try again"
+  fi
+
+  local \
+    config_lineno=0 \
+    config_section_name="" \
+    config_parameter="" \
+    config_parameters="" \
+    config_resource_name="" \
+    config_value="" \
+    default_value="" \
+    esxi_id="" \
+    section_name="" \
+    resource_id=0 \
+    vm_id="" \
+    use_previous_resource="" \
+
+  progress "Parsing the configuration file"
+
+  while
+    IFS="" read -r s
+  do
+    let config_lineno+=1
+
+    # Skip empty lines
+    if [[ "${s}" == "" ]]
+    then
+      continue
+
+    # Skip is it comment
+    elif [[ "${s}" =~ ^# ]]
+    then
+      continue
+
+    # Parse the INI-section
+    # like "[name]  # comments"
+    elif [[ "${s}" =~ ^\[([^\]]*)\] ]]
+    then
+      config_section_name="${BASH_REMATCH[1]}"
+      if [ -z "${section_name}" \
+           -a "${config_section_name}" != "defaults" ]
+      then
+        error_config \
+          "The first INI-section must be [defaults], please reorder and try again"
+      elif [ "${section_name}" = "defaults" \
+             -a "${config_section_name}" != "esxi_list" ]
+      then
+        error_config \
+          "The second INI-section must be [esxi_list], please reorder and try again"
+      elif [ "${section_name}" = "esxi_list" \
+             -a "${config_section_name}" != "vm_list" ]
+      then
+        error_config \
+          "The third INI-section must be [vm_list], please reorder and try again"
+      elif [ "${section_name}" = "vm_list" \
+             -a -n "${config_section_name}" ]
+      then
+        error_config \
+          "The configuration file must consist of only 3x INI-sections: [defaults], [esxi_list], [vm_list]" \
+          "Please remove the extra sections and try again"
+      fi
+      section_name="${config_section_name}"
+
+    # Parse INI-resources with and without parameters or just parameters without INI-resource
+    # like "resource1"
+    #   or "resource1 # comments"
+    #   or "resource1 param1="value1""
+    #   or "resource2     param2=  "value2"   #comments"
+    #   or "resource3   param3     =value3 param4  =     value4 \"
+    #   or "    param5   = value5   param6 =value6"
+    elif [[    "${s}" =~ ^([^[:blank:]#=]+)[[:blank:]]*(\\| #.*)?$
+            || "${s}" =~ ^([^[:blank:]#=]+[[:blank:]])?[[:blank:]]*([^[:blank:]#=]+[[:blank:]=]+.*) ]]
+    then
+      # Getting the resource name by trimming space
+      config_resource_name="${BASH_REMATCH[1]% }"
+      config_parameters="${BASH_REMATCH[2]}"
+
+      if [ -z "${config_resource_name}" ]
+      then
+        if [ -z "${use_previous_resource}" \
+             -a "${section_name}" != "defaults" ]
+        then
+          error_config \
+            "INI-parameters must be formatted in [defaults] section" \
+            "Please place all parameters in the right place and try again"
+        fi
+      elif [[ ! "${config_resource_name}" =~ ^[[:alnum:]_\.\-]+$ ]]
+      then
+        error_config \
+          "Wrong name '${config_resource_name}' for INI-resource, must consist of characters (in regex notation): [[:alnum:]_.-]" \
+          "Please correct the name and try again"
+      else
+        let resource_id+=1
+        case "${section_name}"
+        in
+          "esxi_list" )
+            if \
+              finded_duplicate \
+              "${config_resource_name}" \
+              "${my_esxi_list[@]}"
+            then
+              error_config \
+                "The duplicate esxi definiton '${config_resource_name}'" \
+                "Please remove or correct its name and try again"
+            else
+              my_esxi_list[${resource_id}]="${config_resource_name}"
+            fi
+            ;;
+          "vm_list" )
+            if \
+              finded_duplicate \
+              "${config_resource_name}" \
+              "${my_vm_list[@]}"
+            then
+              error_config \
+                "The duplicate virtual machine definition '${config_resource_name}'" \
+                "Please remove or correct its name and try again"
+            else
+              my_vm_list[${resource_id}]="${config_resource_name}"
+            fi
+            ;;
+          * )
+            error_config \
+              "INI-resources definitions must be formatted in [esxi_list] or [vm_list] sections" \
+              "Please place all resources definitions in the right place and try again"
+            ;;
+        esac
+      fi
+
+      use_previous_resource=""
+      if [ "${config_parameters}" = "\\" ]
+      then
+        use_previous_resource="yes"
+      fi
+
+      # The recursive loop for parsing multiple parameters definition (with values in "" and without it)
+      while [[    "${config_parameters}" =~ ^[[:blank:]]*([^[:blank:]=#]+)[[:blank:]]*=[[:blank:]]*\"([^\"]*)\"[[:blank:]]*(.*|\\)$
+               || "${config_parameters}" =~ ^[[:blank:]]*([^[:blank:]=#]+)[[:blank:]]*=[[:blank:]]*([^[:blank:]=#]+)[[:blank:]]*(.*|\\)$ ]]
+      do
+        config_parameter="${BASH_REMATCH[1]}"
+        config_value="${BASH_REMATCH[2]}"
+        config_parameters="${BASH_REMATCH[3]}"
+
+        # Compare with names of default values (with prefix '0.')
+        if [[ ! " 0.at ${!my_all_params[@]} " =~ " 0.${config_parameter} " ]]
+        then
+          error_config \
+            "The unknown INI-parameter name '${config_parameter}'" \
+            "Please correct (correct names specified at ${config_path}.example) and try again"
+        elif [[    ${resource_id} -gt 0
+                && " ${!my_all_params[@]} " =~ " ${resource_id}.${config_parameter} " ]]
+        then
+          error_config \
+            "The parameter '${config_parameter}' is already defined" \
+            "Please remove the duplicated definition and try again"
+        fi
+
+        if [ "${config_parameter}" = "at" ]
+        then
+          if [ "${section_name}" = "vm_list" ]
+          then
+            # Get the esxi_id from it name ($config_value)
+            for esxi_id in "${!my_esxi_list[@]}"
+            do
+              if [ "${my_esxi_list[${esxi_id}]}" = "${config_value}" ]
+              then
+                esxi_id="yes.${esxi_id}"
+                break
+              fi
+            done
+
+            if [ "${esxi_id#yes.}" != "${esxi_id}" ]
+            then
+              config_value="${esxi_id#yes.}"
+            else
+              error_config \
+                "The esxi identifier '${config_value}' specified in the 'at' parameter does not exist in the section [esxi_list]" \
+                "Please check the esxi identifier name, correct and try again"
+            fi
+          else
+            error_config \
+              "The 'at' parameter allowed only in [vm_list] section" \
+              "Please correct the configuration file and try again"
+          fi
+        fi
+
+        # Don't assign a value if it equal to default value
+        if [ "${my_all_params[0.${config_parameter}]}" != "${config_value}" ]
+        then
+          check_param_value "${config_parameter}" "${config_value}"
+          my_all_params[${resource_id}.${config_parameter}]="${config_value}"
+        fi
+
+        # If line ending with '\' symbol, associate the parameters from next line with current resource_id
+        if [ "${config_parameters}" = "\\" ]
+        then
+          use_previous_resource="yes"
+        fi
+      done
+
+    else
+      error_config \
+        "Cannot parse a string, please correct and try again"
+    fi
+  done \
+  < "${config_path}"
+
+  # Fill in all missing fields in [esxi_list] and [vm_list] sections from default values with some checks
+  for config_parameter in "${!my_all_params[@]}"
+  do
+    if [[ "${config_parameter}" =~ ^0\.(esxi_.*)$ ]]
+    then
+      # Override the parameter name without prefix
+      config_parameter="${BASH_REMATCH[1]}"
+      default_value="${my_all_params[0.${config_parameter}]}"
+      for esxi_id in "${!my_esxi_list[@]}"
+      do
+        if [ ! -v my_all_params[${esxi_id}.${config_parameter}] ]
+        then
+
+          if [ -z "${default_value}" \
+               -a "${config_parameter}" != "esxi_ssh_password" ]
+          then
+            error \
+              "Problem in configuration file:" \
+              "The empty value of required '${config_parameter}' parameter at '${my_esxi_list[${esxi_id}]}' esxi instance definition" \
+              "Please fill the value of parameter and try again"
+          fi
+
+          my_all_params[${esxi_id}.${config_parameter}]="${default_value}"
+        fi
+      done
+    elif [[ "${config_parameter}" =~ ^0\.(.*)$ ]]
+    then
+      # Overriden the parameter name without prefix
+      config_parameter="${BASH_REMATCH[1]}"
+      for vm_id in "${!my_vm_list[@]}"
+      do
+        if [ ! -v my_all_params[${vm_id}.at] ]
+        then
+          error \
+            "Problem in configuration file:" \
+            "The virtual machine '${my_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
+            "Please add the 'at' definition and try again"
+        fi
+
+        esxi_id="${my_all_params[${vm_id}.at]}"
+        if [ ! -v my_all_params[${vm_id}.${config_parameter}] ]
+        then
+
+          if [ -v my_all_params[${esxi_id}.${config_parameter}] ]
+          then
+            default_value="${my_all_params[${esxi_id}.${config_parameter}]}"
+          else
+            default_value="${my_all_params[0.${config_parameter}]}"
+          fi
+
+          if [ -z "${default_value}" \
+               -a "${config_parameter}" != "vm_ssh_password" ]
+          then
+            error \
+              "Problem in configuration file:" \
+              "The empty value of required '${config_parameter}' parameter at '${my_vm_list[$vm_id]}' virtual machine definition" \
+              "Please fill the value of parameter and try again"
+          fi
+
+          my_all_params[${vm_id}.${config_parameter}]="${default_value}"
+        fi
+      done
+    fi
+  done
+
+  return 0
+}
+
 # Function for parsing the list of virtual machines specified at the input
 # and preparing 2 arrays with identifiers of encountered hypervisors and virtual machines,
 # and 1 array with flags for script operation controls
@@ -1142,374 +1512,6 @@ function command_ls {
   done
   echo "Total: ${#my_esxi_list[@]} esxi instances and ${#my_vm_list[@]} virtual machines on them"
   exit 0
-}
-
-# The function to parse configuration file
-#
-#  Input: ${1}                  - The path to configuration INI-file
-# Modify: ${my_all_params}      - Keys - parameter name with identifier of build in next format:
-#                                 {build_identifier}.{parameter_name}
-#                                 Values - value of parameter
-#         ${my_builds_list[@]}  - Keys - identifier of build (actual sequence number)
-#                                 Values - name of build from configuration file
-# Return: 0                     - The parse complete without errors
-#
-function parse_ini_file {
-  local \
-    config_path="${1}"
-
-  function check_param_value {
-    local \
-      param="${1}" \
-      value="${2}" \
-      error=""
-
-    case "${param}"
-    in
-      "esxi_hostname"|"esxi_ssh_username"|"vm_ssh_username" )
-        [[ "${value}" =~ ^[[:alnum:]_\.\-]+$ ]] \
-        || \
-          error="it must consist of characters (in regex notation): [[:alnum:]_.-]"
-        ;;
-      "esxi_ssh_port"|"vm_ssh_port" )
-        [[    "${value}" =~ ^[[:digit:]]+$
-           && "${value}" -ge 0
-           && "${value}" -le 65535 ]] \
-        || \
-          error="it must be a number from 0 to 65535"
-        ;;
-      "esxi_ssh_password"|"vm_ssh_password" )
-        ;;
-      "vm_ipv4_address"|"vm_ipv4_gateway" )
-        [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
-        || \
-          error="it must be the correct IPv4 address (in x.x.x.x format)"
-        ;;
-      "vm_ipv4_netmask" )
-        [[    "${value}" =~ ^255\.255\.255\.(255|254|252|248|240|224|192|128|0)$
-           || "${value}" =~ ^255\.255\.(255|254|252|248|240|224|192|128|0)\.0$
-           || "${value}" =~ ^255\.(255|254|252|248|240|224|192|128|0)\.0\.0$
-           || "${value}" =~ ^(255|254|252|248|240|224|192|128|0)\.0\.0\.0$ ]] \
-        || \
-          error="it must be the correct IPv4 netmask (in x.x.x.x format)"
-        ;;
-      "vm_memory_mb" )
-        [[    "${value}" =~ ^[[:digit:]]+$
-           && "${value}" -gt 1024
-           && "${value}" -le 32768 ]] \
-        || \
-          error="it must be a number from 1024 to 32768"
-        ;;
-      "vm_timezone" )
-        [[ "${value}/" =~ ^([[:alnum:]_\+\-]+/)+$ ]] \
-        || \
-          error="it must consist of characters (in regex notation): [[:alnum:]_-+/]"
-        ;;
-      "vm_vcpus" )
-        [[    "${value}" =~ ^[[:digit:]]+$
-           && "${value}" -gt 0
-           && "${value}" -le 8 ]] \
-        || \
-          error="it must be a number from 1 to 8"
-        ;;
-      * )
-        [ -n "${value}" ] \
-        || \
-          error="it must be not empty"
-        ;;
-    esac
-
-    if [ -n "${error}" ]
-    then
-      error_config \
-        "The wrong value of '${param}' parameter: ${error}" \
-        "Please fix it and try again"
-    fi
-  }
-
-  function error_config {
-    error \
-      "Configuration file (${config_path}) at line ${config_lineno}:" \
-      "> ${s}" \
-      "" \
-      "${@}"
-  }
-
-  if [ ! -s "${config_path}" ]
-  then
-    error \
-      "Can't load a configuration file (${config_path})" \
-      "Please check of it existance and try again"
-  fi
-
-  local \
-    config_lineno=0 \
-    config_section_name="" \
-    config_parameter="" \
-    config_parameters="" \
-    config_resource_name="" \
-    config_value="" \
-    default_value="" \
-    esxi_id="" \
-    section_name="" \
-    resource_id=0 \
-    vm_id="" \
-    use_previous_resource="" \
-
-  progress "Parsing the configuration file"
-
-  while
-    IFS="" read -r s
-  do
-    let config_lineno+=1
-
-    # Skip empty lines
-    if [[ "${s}" == "" ]]
-    then
-      continue
-
-    # Skip is it comment
-    elif [[ "${s}" =~ ^# ]]
-    then
-      continue
-
-    # Parse the INI-section
-    # like "[name]  # comments"
-    elif [[ "${s}" =~ ^\[([^\]]*)\] ]]
-    then
-      config_section_name="${BASH_REMATCH[1]}"
-      if [ -z "${section_name}" \
-           -a "${config_section_name}" != "defaults" ]
-      then
-        error_config \
-          "The first INI-section must be [defaults], please reorder and try again"
-      elif [ "${section_name}" = "defaults" \
-             -a "${config_section_name}" != "esxi_list" ]
-      then
-        error_config \
-          "The second INI-section must be [esxi_list], please reorder and try again"
-      elif [ "${section_name}" = "esxi_list" \
-             -a "${config_section_name}" != "vm_list" ]
-      then
-        error_config \
-          "The third INI-section must be [vm_list], please reorder and try again"
-      elif [ "${section_name}" = "vm_list" \
-             -a -n "${config_section_name}" ]
-      then
-        error_config \
-          "The configuration file must consist of only 3x INI-sections: [defaults], [esxi_list], [vm_list]" \
-          "Please remove the extra sections and try again"
-      fi
-      section_name="${config_section_name}"
-
-    # Parse INI-resources with and without parameters or just parameters without INI-resource
-    # like "resource1"
-    #   or "resource1 # comments"
-    #   or "resource1 param1="value1""
-    #   or "resource2     param2=  "value2"   #comments"
-    #   or "resource3   param3     =value3 param4  =     value4 \"
-    #   or "    param5   = value5   param6 =value6"
-    elif [[    "${s}" =~ ^([^[:blank:]#=]+)[[:blank:]]*(\\| #.*)?$
-            || "${s}" =~ ^([^[:blank:]#=]+[[:blank:]])?[[:blank:]]*([^[:blank:]#=]+[[:blank:]=]+.*) ]]
-    then
-      # Getting the resource name by trimming space
-      config_resource_name="${BASH_REMATCH[1]% }"
-      config_parameters="${BASH_REMATCH[2]}"
-
-      if [ -z "${config_resource_name}" ]
-      then
-        if [ -z "${use_previous_resource}" \
-             -a "${section_name}" != "defaults" ]
-        then
-          error_config \
-            "INI-parameters must be formatted in [defaults] section" \
-            "Please place all parameters in the right place and try again"
-        fi
-      elif [[ ! "${config_resource_name}" =~ ^[[:alnum:]_\.\-]+$ ]]
-      then
-        error_config \
-          "Wrong name '${config_resource_name}' for INI-resource, must consist of characters (in regex notation): [[:alnum:]_.-]" \
-          "Please correct the name and try again"
-      else
-        let resource_id+=1
-        case "${section_name}"
-        in
-          "esxi_list" )
-            if \
-              finded_duplicate \
-              "${config_resource_name}" \
-              "${my_esxi_list[@]}"
-            then
-              error_config \
-                "The duplicate esxi definiton '${config_resource_name}'" \
-                "Please remove or correct its name and try again"
-            else
-              my_esxi_list[${resource_id}]="${config_resource_name}"
-            fi
-            ;;
-          "vm_list" )
-            if \
-              finded_duplicate \
-              "${config_resource_name}" \
-              "${my_vm_list[@]}"
-            then
-              error_config \
-                "The duplicate virtual machine definition '${config_resource_name}'" \
-                "Please remove or correct its name and try again"
-            else
-              my_vm_list[${resource_id}]="${config_resource_name}"
-            fi
-            ;;
-          * )
-            error_config \
-              "INI-resources definitions must be formatted in [esxi_list] or [vm_list] sections" \
-              "Please place all resources definitions in the right place and try again"
-            ;;
-        esac
-      fi
-
-      use_previous_resource=""
-      if [ "${config_parameters}" = "\\" ]
-      then
-        use_previous_resource="yes"
-      fi
-
-      # The recursive loop for parsing multiple parameters definition (with values in "" and without it)
-      while [[    "${config_parameters}" =~ ^[[:blank:]]*([^[:blank:]=#]+)[[:blank:]]*=[[:blank:]]*\"([^\"]*)\"[[:blank:]]*(.*|\\)$
-               || "${config_parameters}" =~ ^[[:blank:]]*([^[:blank:]=#]+)[[:blank:]]*=[[:blank:]]*([^[:blank:]=#]+)[[:blank:]]*(.*|\\)$ ]]
-      do
-        config_parameter="${BASH_REMATCH[1]}"
-        config_value="${BASH_REMATCH[2]}"
-        config_parameters="${BASH_REMATCH[3]}"
-
-        # Compare with names of default values (with prefix '0.')
-        if [[ ! " 0.at ${!my_all_params[@]} " =~ " 0.${config_parameter} " ]]
-        then
-          error_config \
-            "The unknown INI-parameter name '${config_parameter}'" \
-            "Please correct (correct names specified at ${config_path}.example) and try again"
-        elif [[    ${resource_id} -gt 0
-                && " ${!my_all_params[@]} " =~ " ${resource_id}.${config_parameter} " ]]
-        then
-          error_config \
-            "The parameter '${config_parameter}' is already defined" \
-            "Please remove the duplicated definition and try again"
-        fi
-
-        if [ "${config_parameter}" = "at" ]
-        then
-          if [ "${section_name}" = "vm_list" ]
-          then
-            # Get the esxi_id from it name ($config_value)
-            for esxi_id in "${!my_esxi_list[@]}"
-            do
-              if [ "${my_esxi_list[${esxi_id}]}" = "${config_value}" ]
-              then
-                esxi_id="yes.${esxi_id}"
-                break
-              fi
-            done
-
-            if [ "${esxi_id#yes.}" != "${esxi_id}" ]
-            then
-              config_value="${esxi_id#yes.}"
-            else
-              error_config \
-                "The esxi identifier '${config_value}' specified in the 'at' parameter does not exist in the section [esxi_list]" \
-                "Please check the esxi identifier name, correct and try again"
-            fi
-          else
-            error_config \
-              "The 'at' parameter allowed only in [vm_list] section" \
-              "Please correct the configuration file and try again"
-          fi
-        fi
-
-        # Don't assign a value if it equal to default value
-        if [ "${my_all_params[0.${config_parameter}]}" != "${config_value}" ]
-        then
-          check_param_value "${config_parameter}" "${config_value}"
-          my_all_params[${resource_id}.${config_parameter}]="${config_value}"
-        fi
-
-        # If line ending with '\' symbol, associate the parameters from next line with current resource_id
-        if [ "${config_parameters}" = "\\" ]
-        then
-          use_previous_resource="yes"
-        fi
-      done
-
-    else
-      error_config \
-        "Cannot parse a string, please correct and try again"
-    fi
-  done \
-  < "${config_path}"
-
-  # Fill in all missing fields in [esxi_list] and [vm_list] sections from default values with some checks
-  for config_parameter in "${!my_all_params[@]}"
-  do
-    if [[ "${config_parameter}" =~ ^0\.(esxi_.*)$ ]]
-    then
-      # Override the parameter name without prefix
-      config_parameter="${BASH_REMATCH[1]}"
-      default_value="${my_all_params[0.${config_parameter}]}"
-      for esxi_id in "${!my_esxi_list[@]}"
-      do
-        if [ ! -v my_all_params[${esxi_id}.${config_parameter}] ]
-        then
-
-          if [ -z "${default_value}" \
-               -a "${config_parameter}" != "esxi_ssh_password" ]
-          then
-            error \
-              "Problem in configuration file:" \
-              "The empty value of required '${config_parameter}' parameter at '${my_esxi_list[${esxi_id}]}' esxi instance definition" \
-              "Please fill the value of parameter and try again"
-          fi
-
-          my_all_params[${esxi_id}.${config_parameter}]="${default_value}"
-        fi
-      done
-    elif [[ "${config_parameter}" =~ ^0\.(.*)$ ]]
-    then
-      # Overriden the parameter name without prefix
-      config_parameter="${BASH_REMATCH[1]}"
-      for vm_id in "${!my_vm_list[@]}"
-      do
-        if [ ! -v my_all_params[${vm_id}.at] ]
-        then
-          error \
-            "Problem in configuration file:" \
-            "The virtual machine '${my_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
-            "Please add the 'at' definition and try again"
-        fi
-
-        esxi_id="${my_all_params[${vm_id}.at]}"
-        if [ ! -v my_all_params[${vm_id}.${config_parameter}] ]
-        then
-
-          if [ -v my_all_params[${esxi_id}.${config_parameter}] ]
-          then
-            default_value="${my_all_params[${esxi_id}.${config_parameter}]}"
-          else
-            default_value="${my_all_params[0.${config_parameter}]}"
-          fi
-
-          if [ -z "${default_value}" \
-               -a "${config_parameter}" != "vm_ssh_password" ]
-          then
-            error \
-              "Problem in configuration file:" \
-              "The empty value of required '${config_parameter}' parameter at '${my_vm_list[$vm_id]}' virtual machine definition" \
-              "Please fill the value of parameter and try again"
-          fi
-
-          my_all_params[${vm_id}.${config_parameter}]="${default_value}"
-        fi
-      done
-    fi
-  done
 }
 
 # Trap function for SIGINT
