@@ -1,0 +1,10 @@
+[Unit]
+Description=Unmount CDROM for future correct VM's shutdown
+After=local-fs.target
+
+[Service]
+ExecStart=/bin/umount --lazy /cdrom
+Type=oneshot
+
+[Install]
+WantedBy=sysinit.target

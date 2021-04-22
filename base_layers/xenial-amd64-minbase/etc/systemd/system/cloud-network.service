@@ -1,0 +1,15 @@
+[Unit]
+Description=UM's minimalistic cloud-network script
+DefaultDependencies=false
+After=local-fs.target
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+ExecStart=/opt/cloud-network.sh
+SyslogIdentifier=%p
+Type=oneshot
+
+[Install]
+WantedBy=sysinit.target
+WantedBy=network-online.target
