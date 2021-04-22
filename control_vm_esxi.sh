@@ -324,29 +324,6 @@ EOF
   return 0
 }
 
-# Function for getting the needed VM or ESXi parameters
-#
-#  Input: ${1}         - The identifier of virtual machine or esxi on regex notation
-# Modify: ${params[@]} - Keys - parameters names, Values - parameters values
-# Return: 0            - Always
-#
-function get_params {
-  local \
-    regex_id="${1}" \
-    param=""
-
-  params=()
-  for param in "${!my_all_params[@]}"
-  do
-    if [[ "${param}" =~ ^(${regex_id})\.(.*)$ ]]
-    then
-      params[${BASH_REMATCH[2]}]="${my_all_params[${param}]}"
-    fi
-  done
-
-  return 0
-}
-
 # The function to parse configuration file
 #
 #  Input: ${1}                  - The path to configuration INI-file
