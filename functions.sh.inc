@@ -239,6 +239,29 @@ function init_colors {
   return 0
 }
 
+# Function to print parameter value in highlighted if it differs from default value
+#
+#  Input: ${1}         - The parameter name
+#         ${2}         - The identifier of resource to which this parameter belongs
+# Output: value        - The highlighted or not value of parameter
+# Return: 0            - Always
+#
+function print_param() {
+  local \
+    param="${1}" \
+    id="${2}"
+
+  local value="${my_all_params[${id}.${param}]}"
+  if [ "${value}" != "${my_all_params[0.${param}]}" ]
+  then
+    echo -e "${COLOR_WHITE}${value}${COLOR_NORMAL}"
+  else
+    echo "${value}"
+  fi
+
+  return 0
+}
+
 function remove_temp_dir {
   if [ -d "${temp_dir}" ]
   then

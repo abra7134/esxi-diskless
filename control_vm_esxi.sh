@@ -586,16 +586,17 @@ function parse_ini_file {
         config_parameters="${BASH_REMATCH[3]}"
 
         # Compare with names of default values (with prefix '0.')
-        if [[ ! " 0.at ${!my_all_params[@]} " =~ " 0.${config_parameter} " ]]
+        if [ ! -v my_all_params[0.${config_parameter}] \
+               -a "${config_parameter}" != "at" ]
         then
           error_config \
             "The unknown INI-parameter name '${config_parameter}'" \
             "Please correct (correct names specified at ${config_path}.example) and try again"
-        elif [[    ${resource_id} -gt 0
-                && " ${!my_all_params[@]} " =~ " ${resource_id}.${config_parameter} " ]]
+        elif [    ${resource_id} -gt 0 \
+               -a -v my_all_params[${resource_id}.${config_parameter}] ]
         then
           error_config \
-            "The parameter '${config_parameter}' is already defined" \
+            "The parameter '${config_parameter}' is already defined early" \
             "Please remove the duplicated definition and try again"
         fi
 
@@ -1403,21 +1404,6 @@ function command_ls {
     echo "List all of controlled hypervisors and virtual machines instances"
     return 0
   fi
-
-  # Function to print parameter value in highlighted if it differs from default value
-  function print_param() {
-    local \
-      param="${1}" \
-      id="${2}"
-
-    local value="${my_all_params[${id}.${param}]}"
-    if [ "${value}" != "${my_all_params[0.${param}]}" ]
-    then
-      echo -e "${COLOR_WHITE}${value}${COLOR_NORMAL}"
-    else
-      echo "${value}"
-    fi
-  }
 
   parse_ini_file \
     "${ESXI_CONFIG_PATH}"

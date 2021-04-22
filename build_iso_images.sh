@@ -31,14 +31,15 @@ my_dir="${0%/*}"
 declare -A \
   my_all_params=() \
   my_flags=() \
-  my_builds_list=() \
+  my_builds_list=()
 
 # Init default values
 my_all_params=(
   [0.base_layer]="REQUIRED"
   [0.repo_url]=""
   [0.repo_checkout]="master"
-  [0.repo_clone_to]="/"
+  [0.repo_clone_into]="repo/"
+  [0.repo_depth]=1
   [0.run_from_repo]="/deploy.sh"
 )
 
@@ -183,12 +184,24 @@ function parse_ini_file {
       config_parameter="${BASH_REMATCH[1]}"
       config_value="${BASH_REMATCH[2]}"
 
+      if [ -z "${build_name}" ]
+      then
+        error_config \
+          "INI-parameters must be formatted in INI-sections only" \
+          "Please place all parameters in the right place and try again"
+      fi
+
       # Compare with names of default values (with prefix '0.')
       if [ ! -v my_all_params[0.${config_parameter}] ]
       then
         error_config \
           "The unknown INI-parameter name '${config_parameter}'" \
           "Please correct (correct names specified at ${config_path}.example) and try again"
+      elif [ -v my_all_params[${build_id}.${config_parameter}] ]
+      then
+        error_config \
+          "The parameter '${config_parameter}' is already defined early" \
+          "Please remove the duplicated definition and try again"
       fi
 
       check_param_value \
@@ -247,14 +260,45 @@ function command_ls {
   fi
 
   parse_ini_file "${BUILD_CONFIG_PATH}"
+  check_dependencies
 
-  echo ${!my_all_params[@]}
-  echo ${my_all_params[@]}
-}
+  if [ ${#my_builds_list[@]} -lt 1 ]
+  then
+    warning \
+      "The builds list is empty in configuration file" \
+      "Please fill a configuration file and try again"
+  fi
 
-# The function for cleanup before exit
-function cleanup_before_exit {
-  remove_temp_dir
+  echo -e "${COLOR_NORMAL}"
+  echo "List all builded ISO-images:"
+  echo
+
+  local \
+    build_id="" \
+    build_name=""
+
+  for build_id in "${!my_builds_list[@]}"
+  do
+    build_name="${my_builds_list[${build_id}]}"
+
+    printf -- "${COLOR_GREEN}%s${COLOR_NORMAL} (%s):\n" \
+      "${build_name}" \
+      "$(print_param base_layer ${build_id})"
+    printf -- "  repo_url=\"%s\"\n" \
+      "$(print_param repo_url ${build_id})"
+    printf -- "  repo_checkout=\"%s\" repo_clone_into=\"%s\" repo_depth=\"%s\"\n" \
+      "$(print_param repo_checkout ${build_id})" \
+      "$(print_param repo_clone_into ${build_id})" \
+      "$(print_param repo_depth ${build_id})"
+    printf -- "  run_from_repo=\"%s\"\n" \
+      "$(print_param run_from_repo ${build_id})"
+
+  done
+
+  echo
+  echo "Total: ${#my_builds_list[@]} images specified in configuration file"
+
+  exit 0
 }
 
 # Trap function for SIGINT
