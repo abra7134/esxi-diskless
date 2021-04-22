@@ -6,15 +6,13 @@
 а также значения используемых переменных, ровно как и список необходимых зависемостей,
 достаточно просто их запустить.
 
-## build_ubuntu_livecd.sh
+## build_iso_images.sh
 
-Скрипт для сборки `Ubuntu` iso-образа с нуля. На выходе получаем iso загрузочный образ.
+Скрипт для сборки загрузочных iso-образов с нуля.
 
 ##### Системные требования
 
 * cdrkit
-* debootstrap
-* mkpasswd (from debian 'whois' package)
 * squashfs-tools
 
 ## control_vm_esxi.sh
