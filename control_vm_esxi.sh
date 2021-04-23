@@ -45,6 +45,7 @@ my_all_params=(
   [0.esxi_ssh_port]="22"
   [0.esxi_ssh_username]="root"
   [0.local_iso_path]=""
+  [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
   [0.vm_esxi_datastore]="datastore1"
   [0.vm_guest_type]="debian8-64"
   [0.vm_ipv4_address]=""
@@ -364,6 +365,11 @@ function parse_ini_file {
         [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
         || \
           error="it must be the correct IPv4 address (in x.x.x.x format)"
+        ;;
+      "vm_dns_servers" )
+        [[ "${value/ /.}." =~ ^(((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4})+$ ]] \
+        || \
+          error="it must be the correct list of IPv4 address (in x.x.x.x format) delimeted by spaces"
         ;;
       "vm_ipv4_netmask" )
         [[    "${value}" =~ ^255\.255\.255\.(255|254|252|248|240|224|192|128|0)$
@@ -1160,6 +1166,7 @@ function command_create {
       [extendedconfigfile]="${vm_name}.vmxf"
       [floppy0.present]="FALSE"
       [guestos]="${params[vm_guest_type]}"
+      [guestinfo.dns_servers]="${params[vm_dns_servers]}"
       [guestinfo.hostname]="${vm_name}"
       [guestinfo.ipv4_address]="${params[vm_ipv4_address]}"
       [guestinfo.ipv4_netmask]="${params[vm_ipv4_netmask]}"
@@ -1462,10 +1469,11 @@ function command_ls {
           "$(print_param vm_memory_mb ${vm_id})" \
           "$(print_param vm_vcpus ${vm_id})" \
           "$(print_param vm_timezone ${vm_id})"
-        printf -- "    network=\"%s\" gateway=\"%s\" netmask=\"%s\"\n" \
+        printf -- "    network=\"%s\" gateway=\"%s\" netmask=\"%s\" dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
           "$(print_param vm_ipv4_gateway ${vm_id})" \
-          "$(print_param vm_ipv4_netmask ${vm_id})"
+          "$(print_param vm_ipv4_netmask ${vm_id})" \
+          "$(print_param vm_dns_servers ${vm_id})"
         printf -- "    datastore=\"%s\" iso_local_path=\"%s\"\n" \
           "$(print_param vm_esxi_datastore ${vm_id})" \
           "$(print_param local_iso_path ${vm_id})"
