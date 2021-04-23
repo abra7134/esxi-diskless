@@ -66,7 +66,7 @@ debootstrap \
 unmount_orphans
 
 echo "--"
-echo "-- Cleanup unnecessary 'casper' scripts (rm)"
+echo "-- Remove unnecessary 'casper' scripts (rm)"
 echo "--"
 for f in \
   07remove_oem_config \

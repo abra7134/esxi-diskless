@@ -42,7 +42,7 @@ mkdir \
   "${image_dir}/casper"
 
 echo "--"
-echo "-- Cleanup unnecessary files before a squashing (rm)"
+echo "-- Remove unnecessary files before a squashing (rm)"
 echo "--"
 rm \
   --recursive \
