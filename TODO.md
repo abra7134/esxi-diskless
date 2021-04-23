@@ -8,7 +8,7 @@
 
 ##### control_vm_esxi.sh
 
-* Добавить новые параметры `esxi_ssh_connect_timeout`, `vm_ssh_connect_timeout`, `vm_deploy_script_path`;
+* Добавить новые параметры `esxi_ssh_connect_timeout`, `vm_ssh_connect_timeout`;
 * Добавить новые команды 'deploy' (с подстветкой неотдеплоенных нод в команде 'ls'), 'up', 'down';
 * Добавить вывод прогресса копирования ISO-образа на гипервизор;
 * Вынести проверку существования ISO-образа на фазу заливки его в гипервизор (т.к. он может быть там уже,
