@@ -6,7 +6,7 @@
 MY_DEPENDENCIES=("find" "git" "mkisofs" "sha1sum")
 MY_NAME="Script for building ISO-images from templates"
 MY_VARIABLES=("BUILD_CONFIG_PATH" "BUILD_OUTPUT_DIR")
-MY_VERSION="2.210422"
+MY_VERSION="2.210426"
 
 BUILD_CONFIG_PATH="${BUILD_CONFIG_PATH:-"${0%.sh}.ini"}"
 BUILD_OUTPUT_DIR="${BUILD_OUTPUT_DIR:-"."}"
