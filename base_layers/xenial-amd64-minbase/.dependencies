@@ -1,0 +1,9 @@
+cat
+chroot
+cp
+debootstrap
+mkdir
+mkpasswd
+mksquashfs
+patch
+rm

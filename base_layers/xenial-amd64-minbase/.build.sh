@@ -35,22 +35,6 @@ function unmount_orphans {
 trap unmount_orphans ERR
 trap unmount_orphans SIGINT
 
-for required_command in \
-  cp \
-  debootstrap \
-  mkdir \
-  patch \
-  rm
-do
-  if ! type -P "${required_command}" >/dev/null
-  then
-    echo "!!"
-    echo "!! The required command '${required_command}' is not exist"
-    echo "!!"
-    exit 1
-  fi
-done
-
 echo "--"
 echo "-- Bootstrapping an Ubuntu 'xenial' minbase variant with 'casper' livecd hooks (debootstrap)"
 echo "-- in '${build_dir}' directory"

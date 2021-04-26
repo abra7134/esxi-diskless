@@ -3,7 +3,7 @@
 # Script for building ISO-images
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_DEPENDENCIES=("find" "git" "sha1sum")
+MY_DEPENDENCIES=("find" "git" "mkisofs" "sha1sum")
 MY_NAME="Script for building ISO-images from templates"
 MY_VARIABLES=("BUILD_CONFIG_PATH" "BUILD_OUTPUT_DIR")
 MY_VERSION="2.210422"
@@ -98,6 +98,30 @@ function build_base_layer {
     return 1
   fi
 
+  if [ -f "${base_layer_dir}/.dependencies" ]
+  then
+    progress "Checking dependencies of base layer '${base_layer_name}'"
+
+    local \
+      base_layer_dependency=""
+      base_layer_dependencies=()
+    while
+      read -r base_layer_dependency
+    do
+      if [[ "${base_layer_dependency}" =~ ^[[:alnum:]_\.\-]+$ ]]
+      then
+        base_layer_dependencies+=("${base_layer_dependency}")
+      else
+        echo "Skipping the checking the '${base_layer_dependency}' dependency, it must contains only next symbols (in regex notation): [[:alnum:]_.-]"
+      fi
+    done \
+    <"${base_layer_dir}/.dependencies"
+
+    check_commands \
+      check \
+      "${base_layer_dependencies[@]}"
+  fi
+
   progress "Check the hash sum of base layer (find & sha1sum)"
 
   local \
@@ -109,6 +133,7 @@ function build_base_layer {
       find \
         "${base_layer_dir}" \
         \! -name '.pre_image.sh' \
+        \! -name '.dependencies' \
         -type f \
         -exec sha1sum {} \;
     )
