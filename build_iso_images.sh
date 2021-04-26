@@ -162,7 +162,7 @@ function build_base_layer {
   if [    -f "${base_layer_tar_path}" \
        -a -s "${base_layer_tar_path}" ]
   then
-    echo "    The '${base_layer_name}' base layer with '${base_layer_hash}' version is already exists, skip building..."
+    echo "The '${base_layer_name}' base layer with '${base_layer_hash}' version is already exists, skip building..."
   else
     progress "Build the '${base_layer_hash}' version of '${base_layer_name}' base layer (.build.sh)"
 
@@ -669,7 +669,7 @@ function command_build {
     build_name="${my_builds_list[${build_id}]}"
 
     get_params "${build_id}"
-    info "Will build a '${build_name}' image (based on '${params[base_layer]}' layer)"
+    info "Will build a '${build_name}' image (based on '${params[base_layer]}' base layer)"
 
     build_base_layer "${params[base_layer]}" \
     || continue
@@ -717,7 +717,7 @@ function command_build {
     then
       repo_dir="${chroot_dir}/${params[repo_clone_into]}"
 
-      progress "Clone the GIT-repo from '${params[repo_url]}' with depth ${params[repo_depth]}"
+      progress "Clone the GIT-repo from '${params[repo_url]}' with depth ${params[repo_depth]} (git)"
       if ! \
           git \
             clone \
@@ -731,7 +731,7 @@ function command_build {
         continue
       fi
 
-      progress "Checkout the GIT-repo to '${params[repo_checkout]}' commit/branch/tag"
+      progress "Checkout the GIT-repo to '${params[repo_checkout]}' commit/branch/tag (git)"
       if ! \
           git \
             -C "${repo_dir}" \
@@ -743,7 +743,7 @@ function command_build {
         continue
       fi
 
-      progress "Get the hash of 'HEAD' reference of GIT-repo"
+      progress "Get the hash of 'HEAD' reference of GIT-repo (git)"
       if ! \
         repo_head_short_hash=$(
           git \
@@ -758,7 +758,7 @@ function command_build {
         continue
       fi
 
-      echo "    The hash of 'HEAD' reference is '${repo_head_short_hash}'"
+      echo "The hash of 'HEAD' reference is '${repo_head_short_hash}'"
       image_path+="-${repo_head_short_hash}"
       image_version_source+="-${params[run_from_repo]}"
     fi
@@ -776,7 +776,7 @@ function command_build {
         continue
       fi
     fi
-    echo "    The hash of '${base_layer_pre_image_script_path}' script is '${base_layer_pre_image_script_hash}'"
+    echo "The hash of '${base_layer_pre_image_script_path}' script is '${base_layer_pre_image_script_hash}'"
 
     image_version_source+="-${base_layer_pre_image_script_hash}"
 
@@ -789,11 +789,11 @@ function command_build {
         "Failed to get the hash sum of image version source string"
       continue
     fi
-    echo "    The source image version is '${image_version_source}'"
-    echo "    The calculated version of image is '${image_version}'"
+    echo "The source image version is '${image_version_source}'"
+    echo "The calculated version of image is '${image_version}'"
 
     image_path+="-${image_version}.iso"
-    echo "    The resulted ISO-image will be '${image_path}'"
+    echo "The resulted ISO-image will be '${image_path}'"
 
     if [ "${my_flags[force]}" != "yes" \
          -a -f "${image_path}" ]
@@ -923,22 +923,26 @@ function command_ls {
   do
     build_name="${my_builds_list[${build_id}]}"
 
-    printf -- "${COLOR_GREEN}%s${COLOR_NORMAL} (%s):\n" \
+    printf -- "${COLOR_GREEN}%s${COLOR_NORMAL} (based on '%s' base layer)\n" \
       "${build_name}" \
       "$(print_param base_layer ${build_id})"
-    printf -- "  repo_url=\"%s\"\n" \
-      "$(print_param repo_url ${build_id})"
-    printf -- "  repo_checkout=\"%s\" repo_clone_into=\"%s\" repo_depth=\"%s\"\n" \
-      "$(print_param repo_checkout ${build_id})" \
-      "$(print_param repo_clone_into ${build_id})" \
-      "$(print_param repo_depth ${build_id})"
-    printf -- "  run_from_repo=\"%s\"\n" \
-      "$(print_param run_from_repo ${build_id})"
+    if [ -n "${my_all_params[${build_id}.repo_url]}" ]
+    then
+      printf -- "  repo_url=\"%s\"\n" \
+        "$(print_param repo_url ${build_id})"
+      printf -- "  repo_checkout=\"%s\" repo_clone_into=\"%s\" repo_depth=\"%s\"\n" \
+        "$(print_param repo_checkout ${build_id})" \
+        "$(print_param repo_clone_into ${build_id})" \
+        "$(print_param repo_depth ${build_id})"
+      printf -- "  run_from_repo=\"%s\"\n" \
+        "$(print_param run_from_repo ${build_id})"
+    fi
+    printf -- "\n"
 
   done
 
-  echo
   echo "Total: ${#my_builds_list[@]} images specified in configuration file"
+  echo
 
   exit 0
 }
