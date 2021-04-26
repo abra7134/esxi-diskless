@@ -50,7 +50,7 @@ debootstrap \
 unmount_orphans
 
 echo "--"
-echo "-- Remove unnecessary 'casper' scripts (rm)"
+echo "-- Remove unnecessary 'casper' scripts and write ignore paths for 'dpkg' (rm)"
 echo "--"
 for f in \
   07remove_oem_config \
@@ -79,9 +79,13 @@ for f in \
   50ubiquity-bluetooth-agent \
   51unity8_wizard
 do
+  f="usr/share/initramfs-tools/scripts/casper-bottom/${f}"
   rm \
     --verbose \
-    "${build_dir}/usr/share/initramfs-tools/scripts/casper-bottom/${f}"
+    "${build_dir}/${f}"
+  # Don't write this file again on packages updating
+  echo "path-exclude=\"/${f}\"" \
+  >> "${build_dir}"/etc/dpkg/dpkg.cfg.d/ignore-update-casper-scripts
 done
 
 echo "--"
