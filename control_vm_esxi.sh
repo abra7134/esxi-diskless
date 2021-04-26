@@ -367,7 +367,7 @@ function parse_ini_file {
           error="it must be the correct IPv4 address (in x.x.x.x format)"
         ;;
       "vm_dns_servers" )
-        [[ "${value/ /.}." =~ ^(((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4})+$ ]] \
+        [[ "${value// /.}." =~ ^(((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4})+$ ]] \
         || \
           error="it must be the correct list of IPv4 address (in x.x.x.x format) delimeted by spaces"
         ;;
