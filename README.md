@@ -15,7 +15,17 @@
 * debootstrap (для базовых слоёв `ubuntu-*`)
 * genisoimage (может быть отдельным пакетом или в составе `cdrkit` или `wodim` пакетов)
 * git
+* mkpasswd (для базовых слоёв `ubuntu-*`, идёт в составе `whois` пакета)
 * squashfs-tools (для базовых слоёв `ubuntu-*`)
+
+#### Запуск в **Docker**
+
+Для запуска сборки образов в Docker можно использовать следующую последовательность команд:
+
+```bash
+$ docker build -t esxi-diskless .
+$ docker run --rm -v /proc:/proc -v `pwd`:/build --cap-add=SYS_ADMIN esxi-diskless ./build_iso_images.sh
+```
 
 ## control_vm_esxi.sh
 
@@ -25,3 +35,12 @@
 
 * openssh
 * sshpass
+
+#### Запуск в **Docker**
+
+Подобным образом этот скрипт также можно запускать в Docker следующей последовательностью команд:
+
+```bash
+$ docker build -t esxi-diskless .
+$ docker run --rm -v `pwd`:/build esxi-diskless ./control_vm_esxi.sh
+```
