@@ -727,6 +727,10 @@ function parse_vm_list {
         my_flags[destroy_on_another]="yes"
         continue
         ;;
+      "-f" )
+        my_flags[force]="yes"
+        continue
+        ;;
       "-i" )
         my_flags[ignore_unavailable]="yes"
         continue
@@ -760,7 +764,7 @@ function parse_vm_list {
 
 # Function for pinging the remote host
 #
-#   Input: "${1}"   -  The pinging remote hostname
+#   Input: ${1}     -  The pinging remote hostname
 #  Return: 0        -  The remote host is pinging
 #          another  -  The remote host is not pinging or error
 #
@@ -980,6 +984,7 @@ function command_create {
       "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
       "" \
       "Options: -d  Destroy the same virtual machine on another hypervisor (migration analogue)" \
+      "         -f  Recreate a virtual machine on destination hypervisor if it already exists" \
       "         -i  Do not stop the script if any of hypervisors are not available" \
       "         -n  Skip virtual machine availability check on all hypervisors" \
       "" \
@@ -1015,7 +1020,7 @@ function command_create {
 
   if [ "${my_flags[skip_availability_check]}" = "yes" ]
   then
-    info "Will prepare a virtual machines map on necessary hypervisors only (specified '-n' key)"
+    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
     get_esxi_vm_map "${!esxi_ids[@]}"
   else
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
@@ -1051,6 +1056,7 @@ function command_create {
     vm_id_filepath="" \
     vm_iso_filename="" \
     vm_name="" \
+    vm_recreated="" \
     vmx_filepath=""
 
   vm_id_filepath="${temp_dir}/vm_id"
@@ -1063,7 +1069,7 @@ function command_create {
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
+    info "Will ${my_flags[force]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
 
     check_vm_params \
     || continue
@@ -1077,22 +1083,30 @@ function command_create {
     fi
 
     esxi_old_names=()
+    esxi_vm_id=""
     # Preparing the esxi list where the virtual machine is located
     for vm_map in "${esxi_vm_map[@]}"
     do
       if [[ "${vm_map}" =~ ^([[:digit:]]+)\.([[:digit:]]+)\."${vm_name}"$ ]]
       then
-        esxi_old_id="${BASH_REMATCH[1]}"
-        esxi_old_names[${esxi_old_id}]="${my_esxi_list[${esxi_old_id}]} (${my_all_params[${esxi_old_id}.esxi_hostname]})"
-        esxi_old_vm_id="${BASH_REMATCH[2]}"
+        if [ "${BASH_REMATCH[1]}" = "${esxi_id}" ]
+        then
+          esxi_vm_id="${BASH_REMATCH[2]}"
+        else
+          esxi_old_id="${BASH_REMATCH[1]}"
+          esxi_old_vm_id="${BASH_REMATCH[2]}"
+          esxi_old_names[${esxi_old_id}]="${my_esxi_list[${esxi_old_id}]} (${my_all_params[${esxi_old_id}.esxi_hostname]})"
+        fi
       fi
     done
 
     # Checking existance the virtual machine on another or this hypervisors
-    if [ -v esxi_old_names[${esxi_id}] ]
+    if [ -n "${esxi_vm_id}" \
+         -a "${my_flags[force]}" != "yes" ]
     then
       skipping \
-        "The virtual machine already exists on hypervisor"
+        "The virtual machine already exists on hypervisor" \
+        "To force recreate it please run the 'create' command with flag '-f'"
       continue
     elif [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
@@ -1148,6 +1162,25 @@ function command_create {
         "${params[local_iso_path]}" \
         "${esxi_iso_path}" \
       || continue
+    fi
+
+    vm_recreated=""
+    if [ -n "${esxi_vm_id}" \
+         -a "${my_flags[force]}" = "yes" ]
+    then
+      esxi_vm_simple_command \
+        "power shutdown" \
+        "${esxi_vm_id}" \
+        "${esxi_id}" \
+      || continue
+
+      esxi_vm_simple_command \
+        "destroy" \
+        "${esxi_vm_id}" \
+        "${esxi_id}" \
+      || continue
+
+      vm_recreated="yes"
     fi
 
     progress "Prepare a virtual machine configuration file .vmx (in ${temp_dir} directory)"
@@ -1341,7 +1374,7 @@ function command_create {
 
         vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (see details above)"
       else
-        vm_ids[${vm_id}]="${COLOR_YELLOW}CREATED/NO PINGING${COLOR_NORMAL}"
+        vm_ids[${vm_id}]="${COLOR_YELLOW}${vm_recreated:+RE}CREATED/NO PINGING${COLOR_NORMAL}"
       fi
 
       let no_pinging_vms+=1
@@ -1350,7 +1383,7 @@ function command_create {
 
     echo "    The virtual machine is alive, continue"
 
-    vm_ids[${vm_id}]="${COLOR_GREEN}CREATED/PINGED${COLOR_NORMAL}"
+    vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED/PINGED${COLOR_NORMAL}"
     let runned_vms+=1
 
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
@@ -1361,7 +1394,7 @@ function command_create {
           "${esxi_old_vm_id}" \
           "${esxi_old_id}"
       then
-        vm_ids[${vm_id}]="${COLOR_YELLOW}CREATED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
+        vm_ids[${vm_id}]="${COLOR_YELLOW}${vm_recreated:+RE}CREATED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
         continue
       fi
 

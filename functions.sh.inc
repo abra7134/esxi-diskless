@@ -255,8 +255,8 @@ function init_colors {
     COLOR_RED="\e[1;31m"
     COLOR_WHITE="\e[1;37m"
     COLOR_YELLOW="\e[1;33m"
-    UNDERLINE="\033[4m"
-    NORMAL="\033[0m"
+    UNDERLINE="\e[4m"
+    NORMAL="\e[24m"
   fi
 
   return 0
