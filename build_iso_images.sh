@@ -758,7 +758,7 @@ function command_build {
         continue
       fi
 
-      echo "The hash of 'HEAD' reference is '${repo_head_short_hash}'"
+      echo "The hash of 'HEAD' git-reference is '${repo_head_short_hash}'"
       image_path+="-${repo_head_short_hash}"
       image_version_source+="-${params[run_from_repo]}"
     fi
@@ -790,7 +790,7 @@ function command_build {
       continue
     fi
     echo "The source image version is '${image_version_source}'"
-    echo "The calculated version of image is '${image_version}'"
+    echo "The calculated version of image from previous step is '${image_version}'"
 
     image_path+="-${image_version}.iso"
     echo "The resulted ISO-image will be '${image_path}'"
@@ -863,6 +863,29 @@ function command_build {
     then
       skipping \
         "Failed to copy isolinux loader in build tree"
+      continue
+    fi
+
+    progress "Write a '.build_version' special file in build tree (cat)"
+    if ! \
+      cat \
+      >"${image_dir}"/.build_version \
+      <<EOF
+base_layer_tar_path="${base_layer_tar_path}"
+base_layer_pre_image_script_path="${base_layer_pre_image_script_path}"
+base_layer_pre_image_hash="${base_layer_pre_image_script_hash}"
+image_version_source="${image_version_source}"
+image_version="${image_version}"
+image_path="${image_path}"
+repo_url="${params[repo_url]}"
+repo_checkout="${params[repo_checkout]}"
+repo_clone_into="${params[repo_clone_into]}"
+repo_head_short_hash="${repo_head_short_hash}"
+run_from_repo="${params[run_from_repo]}"
+EOF
+    then
+      skipping \
+        "Failed to write a '.build_version' special file in build tree"
       continue
     fi
 
