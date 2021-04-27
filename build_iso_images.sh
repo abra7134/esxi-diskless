@@ -803,24 +803,31 @@ function command_build {
       continue
     fi
 
-    if [ -n "${params[repo_url]}" \
-         -a -f "${repo_dir}/${params[run_from_repo]}" ]
+    if [    -n "${params[repo_url]}" \
+         -a -n "${params[run_from_repo]}" ]
     then
       progress "Run the '${params[run_from_repo]}' script in chroot from GIT-repo"
-      if ! (
-          cd "${base_layer_dir}" \
-          && \
-            chroot \
-              "${chroot_dir}" \
-              /usr/bin/env \
-              - \
-              PATH=/bin:/sbin:/usr/bin:/usr/sbin \
-              LANG=C \
-              "${params[repo_clone_into]}/${params[run_from_repo]}"
-        )
+      if [ -f "${repo_dir}/${params[run_from_repo]}" ]
       then
+        if ! (
+            cd "${base_layer_dir}" \
+            && \
+              chroot \
+                "${chroot_dir}" \
+                /usr/bin/env \
+                - \
+                PATH=/bin:/sbin:/usr/bin:/usr/sbin \
+                LANG=C \
+                "${params[repo_clone_into]}/${params[run_from_repo]}"
+          )
+        then
+          skipping \
+            "Failed to run '${params[run_from_repo]}' deploy script in chroot from GIT-repo"
+          continue
+        fi
+      else
         skipping \
-          "Failed to run '${params[run_from_repo]}' script in chroot from GIT-repo"
+          "Don't find a deploy script '${params[run_from_repo]}' in GIT-repo"
         continue
       fi
     fi

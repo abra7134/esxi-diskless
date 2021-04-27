@@ -32,6 +32,7 @@ root_password_encrypted=$(
 sed --in-place \
   "/^root:/s|\*|${root_password_encrypted}|" \
   "${build_dir}"/etc/shadow
+echo "OK"
 
 echo "--"
 echo "-- Create necessary directories (mkdir)"
