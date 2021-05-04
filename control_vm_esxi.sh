@@ -542,6 +542,14 @@ function parse_ini_file {
               error_config \
                 "The duplicate virtual machine definition '${config_resource_name}'" \
                 "Please remove or correct its name and try again"
+            elif \
+              finded_duplicate \
+              "${config_resource_name}" \
+              "${my_esxi_list[@]}"
+            then
+              error_config \
+                "The definition '${config_resource_name}' already used in [esxi_list] section" \
+                "Please use different names for virtual machines and hypervisors"
             else
               my_vm_list[${resource_id}]="${config_resource_name}"
             fi
@@ -701,60 +709,87 @@ function parse_ini_file {
   return 0
 }
 
-# Function for parsing the list of virtual machines specified at the input
-# and preparing 2 arrays with identifiers of encountered hypervisors and virtual machines,
+# Function for parsing the list of command line arguments specified at the input
+# and preparing 3 arrays with identifiers of encountered hypervisors and virtual machines,
 # and 1 array with flags for script operation controls
 #
-#  Input: ${@}            - List of virtual machines names
-# Modify: ${my_flags[@]}  - Keys - flags names, values - "yes" string
-#         ${esxi_ids[@]}  - Keys - identifiers of hypervisors, values - empty string
-#         ${vm_ids[@]}    - Keys - identifiers of virtual machines, values - empty string
-# Return: 0               - Always
+#  Input: ${@}                - List of flags, virtual machines names or hypervisors names
+# Modify: ${my_flags[@]}      - Keys - flags names, values - "yes" string
+#         ${esxi_ids[@]}      - Keys - identifiers of hypervisors, values - empty string
+#         ${vm_ids[@]}        - Keys - identifiers of virtual machines, values - empty string
+#         ${vm_ids_sorted[@]} - Values - identifiers of virtual machines in order of their indication
+# Return: 0                   - Always
 #
-function parse_vm_list {
+function parse_args_list {
   local \
+    arg_name="" \
+    esxi_name="" \
     esxi_id="" \
     vm_id="" \
     vm_name=""
 
+  local -A \
+    my_flags_map=(
+      [-d]="destroy_on_another"
+      [-f]="force"
+      [-i]="ignore_unavailable"
+      [-n]="skip_availability_check"
+    )
+
   esxi_ids=()
+  my_flags=()
   vm_ids=()
-  for vm_name in "${@}"
+  vm_ids_sorted=()
+
+  for arg_name in "${@}"
   do
-    case "${vm_name}"
-    in
-      "-d" )
-        my_flags[destroy_on_another]="yes"
-        continue
-        ;;
-      "-f" )
-        my_flags[force]="yes"
-        continue
-        ;;
-      "-i" )
-        my_flags[ignore_unavailable]="yes"
-        continue
-        ;;
-      "-n" )
-        my_flags[skip_availability_check]="yes"
-        continue
-        ;;
-      * )
+    if [ -v my_flags_map["${arg_name}"] ]
+    then
+      my_flags[${my_flags_map[${arg_name}]}]="yes"
+      continue
+    fi
+
+    for vm_id in "${!my_vm_list[@]}"
+    do
+      vm_name="${my_vm_list[${vm_id}]}"
+      if [ "${arg_name}" = "${vm_name}" ]
+      then
+        if [ ! -v vm_ids[${vm_id}] ]
+        then
+          esxi_id="${my_all_params[${vm_id}.at]}"
+          esxi_ids[${esxi_id}]=""
+          vm_ids[${vm_id}]=""
+          vm_ids_sorted+=(
+            "${vm_id}"
+          )
+        fi
+        continue 2
+      fi
+    done
+
+    for esxi_id in "${!my_esxi_list[@]}"
+    do
+      esxi_name="${my_esxi_list[${esxi_id}]}"
+      if [ "${arg_name}" = "${esxi_name}" ]
+      then
         for vm_id in "${!my_vm_list[@]}"
         do
-          if [ "${my_vm_list[${vm_id}]}" = "${vm_name}" ]
+          if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" \
+               -a ! -v vm_ids[${vm_id}] ]
           then
-            esxi_id="${my_all_params[${vm_id}.at]}"
-            esxi_ids[${esxi_id}]=""
             vm_ids[${vm_id}]=""
-            continue 2
+            vm_ids_sorted+=(
+              "${vm_id}"
+            )
           fi
         done
-        ;;
-    esac
+        esxi_ids[${esxi_id}]=""
+        continue 2
+      fi
+    done
 
     error \
-      "The specified virtual machine '${vm_name}' is not exists in configuration file" \
+      "The '${arg_name}' is not exists as virtual machine or hypervisor definition in configuration file" \
       "Please check the correctness name and try again" \
       "Available names can be viewed using the '${my_name} ls' command"
   done
@@ -903,10 +938,11 @@ function run_remote_command {
 
 # Function to print the processed virtual machines status
 #
-#  Input: ${vm_id}      - The identifier the current processed virtual machine
-#                         for cases where the process is interrupted
-#         ${vm_ids[@]}  - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
-# Return: 0             - Always
+#  Input: ${vm_id}            - The identifier the current processed virtual machine
+#                               for cases where the process is interrupted
+#         ${vm_ids[@]}        - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
+#         ${vm_ids_sorted[@]} - Values - identifiers of virtual machines in order of their indication
+# Return: 0                   - Always
 #
 function show_processed_vm_status {
   local \
@@ -922,7 +958,7 @@ function show_processed_vm_status {
   then
     echo >&2 -e "${COLOR_NORMAL}"
     echo >&2 "Processed virtual machines status:"
-    for vm_id in "${!vm_ids[@]}"
+    for vm_id in "${vm_ids_sorted[@]}"
     do
       esxi_id="${my_all_params[${vm_id}.at]}"
       esxi_name="${my_esxi_list[${esxi_id}]}"
@@ -981,7 +1017,9 @@ function command_create {
   then
     warning \
       "Please specify a virtual machine name or names to be created and runned" \
-      "Usage: ${my_name} ${command_name} [options] <vm_id> [<vm_id>] ..." \
+      "You can also specify hypervisor names on which all virtual machines will be created" \
+      "" \
+      "Usage: ${my_name} ${command_name} [options] <vm_id> [<esxi_id>] [<vm_id>] ..." \
       "" \
       "Options: -d  Destroy the same virtual machine on another hypervisor (migration analogue)" \
       "         -f  Recreate a virtual machine on destination hypervisor if it already exists" \
@@ -1001,8 +1039,10 @@ function command_create {
   local -A \
     esxi_ids=() \
     vm_ids=()
+  local \
+    vm_ids_sorted=()
 
-  parse_vm_list "${@}"
+  parse_args_list "${@}"
   check_dependencies
 
   if [    "${my_flags[destroy_on_another]}" = "yes" \
@@ -1061,7 +1101,7 @@ function command_create {
 
   vm_id_filepath="${temp_dir}/vm_id"
 
-  for vm_id in "${!vm_ids[@]}"
+  for vm_id in "${vm_ids_sorted[@]}"
   do
     vm_name="${my_vm_list[${vm_id}]}"
     esxi_id="${my_all_params[${vm_id}.at]}"

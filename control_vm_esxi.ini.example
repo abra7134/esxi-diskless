@@ -5,6 +5,7 @@
 #
 # The [defaults] section sets default values that can be overridden for specific ESXi instances or virtual machines
 # The remaining two sections specify the lists of ESXi instances and virtual machines on them and their parameters
+# Note that virtual machines and ESXi instances names must not overlap
 #
 # For example:
 #
