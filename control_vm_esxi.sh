@@ -737,7 +737,6 @@ function parse_args_list {
     )
 
   esxi_ids=()
-  my_flags=()
   vm_ids=()
   vm_ids_sorted=()
 
@@ -1458,13 +1457,12 @@ function command_create {
 function command_ls {
   if [ "${1}" = "description" ]
   then
-    echo "List all of controlled hypervisors and virtual machines instances"
+    echo "List all or specified of controlled hypervisors and virtual machines instances"
     return 0
   fi
 
   parse_ini_file \
     "${ESXI_CONFIG_PATH}"
-  check_dependencies
 
   if [ ${#my_esxi_list[@]} -lt 1 ]
   then
@@ -1473,66 +1471,77 @@ function command_ls {
       "Please fill a configuration file and try again"
   fi
 
-  local use_color=""
+  local -A \
+    esxi_ids=() \
+    vm_ids=()
+  local \
+    vm_ids_sorted=()
+
+  # Parse args list if it not empty
+  if [ "${#}" -gt 0 ]
+  then
+    parse_args_list "${@}"
+  fi
+  # And parse again with all virtual machines if the previous step return the empty list
+  if [ "${#vm_ids[@]}" -lt 1 ]
+  then
+    parse_args_list "${my_vm_list[@]}"
+  fi
+
+  check_dependencies
 
   # Don't check the network availability if '-n' key is specified
-  if [ "${1}" != "-n" ]
+  if [ "${my_flags[skip_availability_check]}" != "yes" ]
   then
     progress "Check network availability all hosts (ping)"
     info "To disable an availability checking use '-n' key"
 
     local -A \
-      ping_list=()
+      ping_status=()
     local \
       id="" \
       hostname=""
 
-    for id in "${!my_esxi_list[@]}" "${!my_vm_list[@]}"
+    for id in "${!esxi_ids[@]}" "${!vm_ids[@]}"
     do
       # The small hack without condition since parameters are not found in both lists at once
       hostname="${my_all_params[${id}.esxi_hostname]}${my_all_params[${id}.vm_ipv4_address]}"
       if ping_host "${hostname}"
       then
-        ping_list[${id}]="yes"
+        ping_status[${id}]="${COLOR_GREEN}"
+      else
+        ping_status[${id}]="${COLOR_RED}"
       fi
     done
 
-    use_color="yes"
     progress "Completed"
-    echo
   fi
 
-  echo -en "${COLOR_NORMAL}"
-  echo "List all of controlled ESXi and VM instances:"
-  info "The higlighted values are overridden from default values ([defaults] section)"
+  echo -e "${COLOR_NORMAL}"
+  echo "List of controlled ESXi and VM instances (in order specified in the configuration file):"
+  info \
+    "You can also specify a list of ESXi and VM instances to display only" \
+    "The higlighted values are overridden from default values ([defaults] section)"
 
   local \
     color_alive="" \
     esxi_id="" \
     vm_id=""
 
-  for esxi_id in "${!my_esxi_list[@]}"
+  for esxi_id in "${!esxi_ids[@]}"
   do
-    [ -v ping_list[${esxi_id}] ] \
-    && color_alive="${use_color:+${COLOR_GREEN}}" \
-    || color_alive="${use_color:+${COLOR_RED}}"
-
-    printf -- "${color_alive}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
+    printf -- "${ping_status[${esxi_id}]}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
       "${my_esxi_list[${esxi_id}]}" \
       "$(print_param esxi_ssh_username ${esxi_id})" \
       "$(print_param esxi_hostname ${esxi_id})" \
       "$(print_param esxi_ssh_port ${esxi_id})"
 
-    for vm_id in "${!my_vm_list[@]}"
+    for vm_id in "${!vm_ids[@]}"
     do
       if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" ]
       then
-        [ -v ping_list[${vm_id}] ] \
-        && color_alive="${use_color:+${COLOR_GREEN}}" \
-        || color_alive="${use_color:+${COLOR_RED}}"
-
         printf -- "\n"
-        printf -- "  ${color_alive}%s${COLOR_NORMAL} (%s@%s:%s) [%s]:\n" \
+        printf -- "  ${ping_status[${vm_id}]}%s${COLOR_NORMAL} (%s@%s:%s) [%s]:\n" \
           "${my_vm_list[${vm_id}]}" \
           "$(print_param vm_ssh_username ${vm_id})" \
           "$(print_param vm_ipv4_address ${vm_id})" \
@@ -1554,7 +1563,11 @@ function command_ls {
     done
     echo
   done
-  echo "Total: ${#my_esxi_list[@]} esxi instances and ${#my_vm_list[@]} virtual machines on them"
+  printf -- "Total: %d (of %d) hypervisor(s) and %d (of %d) virtual machine(s) them displayed\n" \
+    "${#esxi_ids[@]}" \
+    "${#my_esxi_list[@]}" \
+    "${#vm_ids[@]}" \
+    "${#my_vm_list[@]}"
   exit 0
 }
 
