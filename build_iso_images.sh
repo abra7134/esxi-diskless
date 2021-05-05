@@ -284,52 +284,63 @@ function skipping {
   return 0
 }
 
-# Function for parsing the list of builds specified at the input
-# and preparing array with identifiers of encountered builds,
+# Function for parsing the list of command line arguments specified at the input
+# and preparing 2 arrays with identifiers of encountered builds,
 # and array with flags for script operation controls
 #
-#  Input: ${@}             - List of virtual machines names
-# Modify: ${my_flags[@]}   - Keys - flags names, values - "yes" string
-#         ${builds_ids[@]} - Keys - identifiers of builds, values - empty string
-# Return: 0                - Always
+#  Input: ${@}                    - List of virtual machines names
+# Modify: ${my_flags[@]}          - Keys - flags names, values - "yes" string
+#         ${builds_ids[@]}        - Keys - identifiers of builds, values - empty string
+#         ${builds_ids_sorted[@]} - Values - identifiers of builds in order of their indication
+# Return: 0                       - Always
 #
-function parse_builds_list {
+function parse_args_list {
   local \
-    build_id="" \
-    build_name=""
+    arg_name="" \
+    build_id=""
+
+  local -A \
+    my_flags_map=(
+      [-f]="force"
+    )
 
   builds_ids=()
-  for build_name in "${@}"
-  do
-    case "${build_name}"
-    in
-      "-f" )
-        my_flags[force]="yes"
-        continue
-        ;;
-      "all" )
-        for build_id in "${!my_builds_list[@]}"
-        do
-          builds_ids[${build_id}]=""
-        done
-        continue
-        ;;
-      * )
-        for build_id in "${!my_builds_list[@]}"
-        do
-          if [ "${my_builds_list[${build_id}]}" = "${build_name}" ]
-          then
-            builds_ids[${build_id}]=""
-            continue 2
-          fi
-        done
-        ;;
-    esac
+  builds_ids_sorted=()
 
-    error \
-      "The specified build '${build_name}' is not exists in configuration file" \
-      "Please check the correctness name and try again" \
-      "Available names can be viewed using the '${my_name} ls' command"
+  for arg_name in "${@}"
+  do
+    if [ -v my_flags_map["${arg_name}"] ]
+    then
+      my_flags[${my_flags_map[${arg_name}]}]="yes"
+      continue
+    fi
+
+    for build_id in "${!my_builds_list[@]}"
+    do
+      if [ "${arg_name}" = "all" \
+           -o "${arg_name}" = "${my_builds_list[${build_id}]}" ]
+      then
+        if [ ! -v builds_ids[${build_id}] ]
+        then
+          builds_ids[${build_id}]=""
+          builds_ids_sorted+=(
+            "${build_id}"
+          )
+        fi
+        if [ "${arg_name}" != "all" ]
+        then
+          continue 2
+        fi
+      fi
+    done
+
+    if [ "${arg_name}" != "all" ]
+    then
+      error \
+        "The specified build '${arg_name}' is not exists in configuration file" \
+        "Please check the correctness name and try again" \
+        "Available names can be viewed using the '${my_name} ls' command"
+    fi
   done
 
   return 0
@@ -551,7 +562,7 @@ function show_processed_builds_status {
   if [ "${#builds_ids[@]}" -gt 0 ]
   then
     echo >&2 -e "${COLOR_NORMAL}"
-    echo >&2 "Processed templates builds status:"
+    echo >&2 "Processed builds status:"
     for build_id in "${!builds_ids[@]}"
     do
       build_name="${my_builds_list[${build_id}]}"
@@ -632,8 +643,10 @@ function command_build {
 
   local -A \
     builds_ids=()
+  local \
+    builds_ids_sorted=()
 
-  parse_builds_list "${@}"
+  parse_args_list "${@}"
 
   if [ "${#builds_ids[@]}" -lt 1 ]
   then
@@ -664,7 +677,7 @@ function command_build {
     repo_dir="" \
     repo_head_short_hash="" \
 
-  for build_id in "${!builds_ids[@]}"
+  for build_id in "${builds_ids_sorted[@]}"
   do
     build_name="${my_builds_list[${build_id}]}"
 
@@ -927,12 +940,11 @@ EOF
 function command_ls {
   if [ "${1}" = "description" ]
   then
-    echo "List all of templates available for build"
+    echo "List all or specified of templates available for build"
     return 0
   fi
 
   parse_ini_file "${BUILD_CONFIG_PATH}"
-  check_dependencies
 
   if [ ${#my_builds_list[@]} -lt 1 ]
   then
@@ -941,19 +953,37 @@ function command_ls {
       "Please fill a configuration file and try again"
   fi
 
+  local -A \
+    builds_ids=()
+  local \
+    builds_ids_sorted=()
+
+  # Parse args list if it not empty
+  if [ "${#}" -gt 0 ]
+  then
+    parse_args_list "${@}"
+  fi
+  # And parse again with all builds if the previous step return the empty list
+  if [ "${#builds_ids[@]}" -lt 1 ]
+  then
+    parse_args_list "${my_builds_list[@]}"
+  fi
+
+  check_dependencies
+
   echo -e "${COLOR_NORMAL}"
-  echo "List all builded ISO-images:"
+  echo "List builded ISO-images:"
   echo
 
   local \
     build_id="" \
     build_name=""
 
-  for build_id in "${!my_builds_list[@]}"
+  for build_id in "${!builds_ids[@]}"
   do
     build_name="${my_builds_list[${build_id}]}"
 
-    printf -- "${COLOR_GREEN}%s${COLOR_NORMAL} (based on '%s' base layer)\n" \
+    printf -- "${COLOR_GREEN}%s${COLOR_NORMAL} (on '%s' base layer)\n" \
       "${build_name}" \
       "$(print_param base_layer ${build_id})"
     if [ -n "${my_all_params[${build_id}.repo_url]}" ]
@@ -971,7 +1001,9 @@ function command_ls {
 
   done
 
-  echo "Total: ${#my_builds_list[@]} images specified in configuration file"
+  printf -- "Total: %d (of %d) images displayed\n" \
+    "${#builds_ids[@]}" \
+    "${#my_builds_list[@]}"
   echo
 
   exit 0
