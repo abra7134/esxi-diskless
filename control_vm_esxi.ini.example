@@ -36,6 +36,7 @@ esxi_hostname=""
 esxi_ssh_password=""
 esxi_ssh_port=22
 esxi_ssh_username="root"
+local_hook_path=""
 local_iso_path=""
 vm_dns_servers="8.8.8.8 8.8.4.4"  # Separated by spaces
 vm_esxi_datastore="datastore1"

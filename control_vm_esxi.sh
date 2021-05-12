@@ -44,6 +44,7 @@ my_all_params=(
   [0.esxi_ssh_password]=""
   [0.esxi_ssh_port]="22"
   [0.esxi_ssh_username]="root"
+  [0.local_hook_path]=""
   [0.local_iso_path]="REQUIRED"
   [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
   [0.vm_esxi_datastore]="datastore1"
@@ -93,6 +94,21 @@ function check_vm_params {
       "The specified ISO-file path '${params[local_iso_path]}' is not exists" \
       "Please check it, correct and try again"
     return 1
+  elif [ -n "${params[local_hook_path]}" ]
+  then
+    if [ ! -f "${params[local_hook_path]}" ]
+    then
+      skipping \
+        "The specified hook-file path '${params[local_hook_path]}' is not exists" \
+        "Please check it, correct and try again"
+      return 1
+    elif [ ! -x "${params[local_hook_path]}" ]
+    then
+      skipping \
+        "The specified hook-file path '${params[local_hook_path]}' is not executable" \
+        "Please set right permissions (+x) and try again"
+      return 1
+    fi
   elif [ "${params[vm_ipv4_address]}" = "${params[vm_ipv4_gateway]}" ]
   then
     skipping \
@@ -395,6 +411,11 @@ function parse_ini_file {
         [[ "${value}" =~ ^[[:alnum:]_/\.\-]+$ ]] \
         || \
           error="it must consist of characters (in regex notation): [[:alnum:]_.-/]"
+        ;;
+      "local_hook_path" )
+        [[ "${value}" =~ ^([[:alnum:]_/\.\-]+)?$ ]] \
+        || \
+          error="it must be empty or consist of characters (in regex notation): [[:alnum:]_.-/]"
         ;;
       "vm_ipv4_address"|"vm_ipv4_gateway" )
         [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
@@ -840,6 +861,44 @@ function ping_host {
     -w 1 \
     "${1}" \
   &>/dev/null
+}
+
+# Function to run hook script
+#
+#  Input: ${1}      - The hook type (create, destroy, restart)
+#         ${2}      - The hook path (must be executable)
+#         ${3}      - The name of virtual machine for which the hook is called
+#         ${4}      - The hypervisor name on which the virtual machine is serviced
+#         ${params} - The associative array with virtual machine and hypervisor parameters
+# Output:           - The stdout from hook script
+# Return: 0         - The hook script called is ok
+#         another   - Otherwise
+#
+function run_hook {
+  local \
+    hook_type="${1}" \
+    hook_path="${2}" \
+    vm_name="${3}" \
+    esxi_name="${4}"
+
+  progress "Run the hook script '${hook_path} ${hook_type} ${vm_name}'"
+
+  export \
+    ESXI_NAME="${esxi_name}" \
+    ESXI_HOSTNAME="${params[esxi_hostname]}" \
+    TYPE="${hook_type}" \
+    VM_IPV4_ADDRESS="${params[vm_ipv4_address]}" \
+    VM_SSH_PASSWORD="${params[vm_ssh_password]}" \
+    VM_SSH_PORT="${params[vm_ssh_port]}" \
+    VM_SSH_USERNAME="${params[vm_ssh_username]}" \
+    VM_NAME="${vm_name}"
+
+  "${hook_path}" \
+    "${hook_type}" \
+    "${vm_name}" \
+  || return 1
+
+  return 0
 }
 
 # Function to run remote command through SSH-connection
@@ -1465,10 +1524,28 @@ function command_create {
           "${esxi_old_vm_id}" \
           "${esxi_old_id}"
       then
-        vm_ids[${vm_id}]="${COLOR_YELLOW}${vm_recreated:+RE}CREATED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
+        vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
         continue
       fi
+    fi
 
+    if [ -n "${params[local_hook_path]}" ]
+    then
+      if ! \
+        run_hook \
+          "create" \
+          "${params[local_hook_path]}" \
+          "${vm_name}" \
+          "${esxi_name}"
+      then
+        vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL}"
+      else
+        vm_ids[${vm_id}]+="${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL}"
+      fi
+    fi
+
+    if [ "${my_flags[destroy_on_another]}" = "yes" ]
+    then
       vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_esxi_list[${esxi_old_id}]}' hypervisor)"
     fi
 
@@ -1579,18 +1656,19 @@ function command_ls {
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
           "$(print_param vm_guest_type ${vm_id})"
-        printf -- "    memory_mb=\"%s\" vcpus=\"%s\" timezone=\"%s\"\n" \
+        printf -- "    memory_mb=\"%s\" vcpus=\"%s\" timezone=\"%s\" datastore=\"%s\"\n" \
           "$(print_param vm_memory_mb ${vm_id})" \
           "$(print_param vm_vcpus ${vm_id})" \
-          "$(print_param vm_timezone ${vm_id})"
+          "$(print_param vm_timezone ${vm_id})" \
+          "$(print_param vm_esxi_datastore ${vm_id})"
         printf -- "    network=\"%s\" gateway=\"%s\" netmask=\"%s\" dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
           "$(print_param vm_ipv4_gateway ${vm_id})" \
           "$(print_param vm_ipv4_netmask ${vm_id})" \
           "$(print_param vm_dns_servers ${vm_id})"
-        printf -- "    datastore=\"%s\" iso_local_path=\"%s\"\n" \
-          "$(print_param vm_esxi_datastore ${vm_id})" \
-          "$(print_param local_iso_path ${vm_id})"
+        printf -- "    local_iso_path=\"%s\" local_hook_path=\"%s\"\n" \
+          "$(print_param local_iso_path ${vm_id})" \
+          "$(print_param local_hook_path ${vm_id})"
       fi
     done
     echo
@@ -1606,7 +1684,10 @@ function command_ls {
 # Trap function for SIGINT
 function trap_sigint {
   remove_temp_dir
-  show_processed_vm_status
+  if [ "${command_name}" != "ls" ]
+  then
+    show_processed_vm_status
+  fi
   warning "Interrupted"
 }
 
