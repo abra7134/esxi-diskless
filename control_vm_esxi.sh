@@ -128,24 +128,53 @@ function esxi_vm_simple_command {
       "ssh" \
       "${esxi_ssh_destination[@]}" \
       "set -o pipefail" \
-      "vim-cmd vmsvc/power.getstate \"${esxi_vm_id}\" | awk 'NR == 2 { print \$0; }'" \
-      "|| Failed to get virtual machine power status on '${esxi_name}' hypervisor (vim-cmd vmsvc/power.getstatus)" \
+      "vim-cmd vmsvc/getallvms | awk 'BEGIN { state=\"Absent\"; } \$1 == \"${esxi_vm_id}\" { state=\"Present\"; } END { print state; }'" \
+      "|| Failed to get virtual machine presence on '${esxi_name}' hypervisor (vim-cmd vmsvc/getallvms)" \
     || return 1
 
     if ! \
       vm_state=$(< "${vm_state_filepath}")
     then
       skipping \
-        "Failed to get virtual machine power status from '${vm_state_filepath}' file"
+        "Failed to get virtual machine presence from '${vm_state_filepath}' file"
       return 1
-    elif [    "${vm_state}" != "Powered on" \
-           -a "${vm_state}" != "Powered off" ]
+    elif [    "${vm_state}" != "Present" \
+           -a "${vm_state}" != "Absent" ]
     then
       skipping \
-        "Can't parse the virtual machine power status" \
+        "Can't parse the virtual machine presence" \
         "'${vm_state}'"
       return 1
     fi
+
+    if [ "${vm_state}" = "Present" ]
+    then
+      run_remote_command \
+      >"${vm_state_filepath}" \
+        "ssh" \
+        "${esxi_ssh_destination[@]}" \
+        "set -o pipefail" \
+        "vim-cmd vmsvc/power.getstate \"${esxi_vm_id}\" | awk 'NR == 2 { print \$0; }'" \
+        "|| Failed to get virtual machine power status on '${esxi_name}' hypervisor (vim-cmd vmsvc/power.getstatus)" \
+      || return 1
+
+      if ! \
+        vm_state=$(< "${vm_state_filepath}")
+      then
+        skipping \
+          "Failed to get virtual machine power status from '${vm_state_filepath}' file"
+        return 1
+      elif [    "${vm_state}" != "Powered on" \
+             -a "${vm_state}" != "Powered off" ]
+      then
+        skipping \
+          "Can't parse the virtual machine power status" \
+          "'${vm_state}'"
+        return 1
+      fi
+    fi
+
+    return 0
   }
 
   local \
@@ -186,7 +215,12 @@ function esxi_vm_simple_command {
     "${esxi_vm_id}" \
   || return 1
 
-  if [ "${vm_state}" = "Powered on" ]
+  if [ "${vm_state}" = "Absent" ]
+  then
+    skipping \
+      "Can't ${esxi_vm_operation} a virtual machine because it's absent on hypervisor"
+    return 1
+  elif [ "${vm_state}" = "Powered on" ]
   then
     if [ "${esxi_vm_operation}" = "power on" ]
     then
@@ -212,32 +246,30 @@ function esxi_vm_simple_command {
     "|| Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})" \
   || return 1
 
-  if [ "${esxi_vm_operation}" != "destroy" ]
+  local attempts=10
+
+  if ! \
+    until
+      sleep 5;
+      esxi_get_vm_state \
+        "${esxi_vm_id}" \
+      || return 1;
+      [ ${attempts} -lt 1 ] \
+      || [ "${esxi_vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
+      || [ "${esxi_vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
+      || [ "${esxi_vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
+      || [ "${esxi_vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
+    do
+      echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
+      let attempts-=1
+    done
   then
-    local attempts=10
-
-    if ! \
-      until
-        sleep 5;
-        esxi_get_vm_state \
-          "${esxi_vm_id}" \
-        || return 1;
-        [ ${attempts} -lt 1 ] \
-        || [ "${esxi_vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
-        || [ "${esxi_vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
-        || [ "${esxi_vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
-      do
-        echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
-        let attempts-=1
-      done
-    then
-      skipping \
-        "Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
-      return 1
-    fi
-
-    echo "    The virtual machine is ${esxi_vm_operation}, continue"
+    skipping \
+      "Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
+    return 1
   fi
+
+  echo "    The virtual machine is ${esxi_vm_operation}'ed, continue"
 
   return 0
 }
