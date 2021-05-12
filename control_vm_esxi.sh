@@ -40,17 +40,17 @@ declare -A \
 
 # Init default values
 my_all_params=(
-  [0.esxi_hostname]=""
+  [0.esxi_hostname]="REQUIRED"
   [0.esxi_ssh_password]=""
   [0.esxi_ssh_port]="22"
   [0.esxi_ssh_username]="root"
-  [0.local_iso_path]=""
+  [0.local_iso_path]="REQUIRED"
   [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
   [0.vm_esxi_datastore]="datastore1"
   [0.vm_guest_type]="debian8-64"
-  [0.vm_ipv4_address]=""
+  [0.vm_ipv4_address]="REQUIRED"
   [0.vm_ipv4_netmask]="255.255.255.0"
-  [0.vm_ipv4_gateway]=""
+  [0.vm_ipv4_gateway]="REQUIRED"
   [0.vm_memory_mb]="1024"
   [0.vm_network_name]="VM Network"
   [0.vm_ssh_password]=""
@@ -391,7 +391,10 @@ function parse_ini_file {
         || \
           error="it must be a number from 0 to 65535"
         ;;
-      "esxi_ssh_password"|"vm_ssh_password" )
+      "local_iso_path" )
+        [[ "${value}" =~ ^[[:alnum:]_/\.\-]+$ ]] \
+        || \
+          error="it must consist of characters (in regex notation): [[:alnum:]_.-/]"
         ;;
       "vm_ipv4_address"|"vm_ipv4_gateway" )
         [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
@@ -431,8 +434,9 @@ function parse_ini_file {
           error="it must be a number from 1 to 8"
         ;;
       * )
-        [ -n "${value}" ] \
-        || \
+        [ -z "${value}" \
+          -a "${my_all_params[0.${param}]}" != "" ] \
+        && \
           error="it must be not empty"
         ;;
     esac
@@ -652,12 +656,10 @@ function parse_ini_file {
           fi
         fi
 
-        # Don't assign a value if it equal to default value
-        if [ "${my_all_params[0.${config_parameter}]}" != "${config_value}" ]
-        then
-          check_param_value "${config_parameter}" "${config_value}"
-          my_all_params[${resource_id}.${config_parameter}]="${config_value}"
-        fi
+        check_param_value \
+          "${config_parameter}" \
+          "${config_value}"
+        my_all_params[${resource_id}.${config_parameter}]="${config_value}"
 
         # If line ending with '\' symbol, associate the parameters from next line with current resource_id
         if [ "${config_parameters}" = "\\" ]
@@ -686,8 +688,7 @@ function parse_ini_file {
         if [ ! -v my_all_params[${esxi_id}.${config_parameter}] ]
         then
 
-          if [ -z "${default_value}" \
-               -a "${config_parameter}" != "esxi_ssh_password" ]
+          if [ "${default_value}" = "REQUIRED" ]
           then
             error \
               "Problem in configuration file:" \
@@ -723,8 +724,7 @@ function parse_ini_file {
             default_value="${my_all_params[0.${config_parameter}]}"
           fi
 
-          if [ -z "${default_value}" \
-               -a "${config_parameter}" != "vm_ssh_password" ]
+          if [ "${default_value}" = "REQUIRED" ]
           then
             error \
               "Problem in configuration file:" \
