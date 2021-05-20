@@ -867,14 +867,14 @@ function ping_host {
 
 # Function to run hook script
 #
-#  Input: ${1}      - The hook type (create, destroy, restart)
-#         ${2}      - The hook path (must be executable)
-#         ${3}      - The name of virtual machine for which the hook is called
-#         ${4}      - The hypervisor name on which the virtual machine is serviced
-#         ${params} - The associative array with virtual machine and hypervisor parameters
-# Output:           - The stdout from hook script
-# Return: 0         - The hook script called is ok
-#         another   - Otherwise
+#  Input: ${1}         - The hook type (create, destroy, restart)
+#         ${2}         - The hook path (must be executable)
+#         ${3}         - The name of virtual machine for which the hook is called
+#         ${4}         - The hypervisor name on which the virtual machine is serviced
+#         ${params[@]} - The associative array with virtual machine and hypervisor parameters
+# Output: >&1          - The stdout from hook script
+# Return: 0            - The hook script called is ok
+#         another      - Otherwise
 #
 function run_hook {
   local \
@@ -899,6 +899,16 @@ function run_hook {
     "${hook_type}" \
     "${vm_name}" \
   || return 1
+
+  export -n \
+    ESXI_NAME \
+    ESXI_HOSTNAME \
+    TYPE \
+    VM_IPV4_ADDRESS \
+    VM_SSH_PASSWORD \
+    VM_SSH_PORT \
+    VM_SSH_USERNAME \
+    VM_NAME
 
   return 0
 }
