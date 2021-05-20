@@ -15,7 +15,7 @@ my_dir="${0%/*}"
 
 # my_all_params - associative array with all params from configuration file
 #                 the first number of the index name is the resource number, the digit "0" is reserved for default settings
-#                 other resource numbers will be referenced in "my_esxi_list" and "my_vm_list" associative arrays
+#                 other resource numbers will be referenced in my_config_esxi_list and my_config_vm_list associative arrays
 # for example:
 #
 # my_all_params=(
@@ -25,18 +25,18 @@ my_dir="${0%/*}"
 #   [1.esxi_hostname]="esxi1.local"
 #   [2.vm_ipv4_address]="192.168.0.1"
 # )
-# my_esxi_list=(
+# my_config_esxi_list=(
 #   [1]="esxi.test"
 # )
-# my_vm_list=(
+# my_config_vm_list=(
 #   [2]="vm.test.local"
 # )
 #
 declare -A \
   my_all_params=() \
   my_flags=() \
-  my_esxi_list=() \
-  my_vm_list=()
+  my_config_esxi_list=() \
+  my_config_vm_list=()
 
 # Init default values
 my_all_params=(
@@ -205,10 +205,10 @@ function esxi_vm_simple_command {
   then
     internal \
       "The \${esxi_vm_operation} must be 'destroy', 'power on', 'power off' or 'power shutdown', but not '${esxi_vm_operation}'"
-  elif [ ! -v my_esxi_list[${esxi_id}] ]
+  elif [ ! -v my_config_esxi_list[${esxi_id}] ]
   then
     internal \
-      "For hypervisor with \${esxi_id} = '${esxi_id}' don't exists at \${my_esxi_list} array"
+      "For hypervisor with \${esxi_id} = '${esxi_id}' don't exists at \${my_config_esxi_list} array"
   fi
 
   local \
@@ -217,7 +217,7 @@ function esxi_vm_simple_command {
     vm_state_filepath="${temp_dir}/vm_state" \
     vm_state=""
 
-  esxi_name="${my_esxi_list[${esxi_id}]}"
+  esxi_name="${my_config_esxi_list[${esxi_id}]}"
   esxi_ssh_destination=(
     "${my_all_params[${esxi_id}.esxi_ssh_username]}"
     "${my_all_params[${esxi_id}.esxi_ssh_password]}"
@@ -312,7 +312,7 @@ function get_esxi_vm_map {
   esxi_alive_list=()
   for esxi_id in "${@}"
   do
-    esxi_name="${my_esxi_list[${esxi_id}]}"
+    esxi_name="${my_config_esxi_list[${esxi_id}]}"
     progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd)"
 
     get_params "${esxi_id}"
@@ -583,20 +583,20 @@ function parse_ini_file {
             if \
               finded_duplicate \
               "${config_resource_name}" \
-              "${my_esxi_list[@]}"
+              "${my_config_esxi_list[@]}"
             then
               error_config \
                 "The duplicate esxi definiton '${config_resource_name}'" \
                 "Please remove or correct its name and try again"
             else
-              my_esxi_list[${resource_id}]="${config_resource_name}"
+              my_config_esxi_list[${resource_id}]="${config_resource_name}"
             fi
             ;;
           "vm_list" )
             if \
               finded_duplicate \
               "${config_resource_name}" \
-              "${my_vm_list[@]}"
+              "${my_config_vm_list[@]}"
             then
               error_config \
                 "The duplicate virtual machine definition '${config_resource_name}'" \
@@ -604,13 +604,13 @@ function parse_ini_file {
             elif \
               finded_duplicate \
               "${config_resource_name}" \
-              "${my_esxi_list[@]}"
+              "${my_config_esxi_list[@]}"
             then
               error_config \
                 "The definition '${config_resource_name}' already used in [esxi_list] section" \
                 "Please use different names for virtual machines and hypervisors"
             else
-              my_vm_list[${resource_id}]="${config_resource_name}"
+              my_config_vm_list[${resource_id}]="${config_resource_name}"
             fi
             ;;
           * )
@@ -655,9 +655,9 @@ function parse_ini_file {
           if [ "${section_name}" = "vm_list" ]
           then
             # Get the esxi_id from it name ($config_value)
-            for esxi_id in "${!my_esxi_list[@]}"
+            for esxi_id in "${!my_config_esxi_list[@]}"
             do
-              if [ "${my_esxi_list[${esxi_id}]}" = "${config_value}" ]
+              if [ "${my_config_esxi_list[${esxi_id}]}" = "${config_value}" ]
               then
                 esxi_id="yes.${esxi_id}"
                 break
@@ -706,7 +706,7 @@ function parse_ini_file {
       # Override the parameter name without prefix
       config_parameter="${BASH_REMATCH[1]}"
       default_value="${my_all_params[0.${config_parameter}]}"
-      for esxi_id in "${!my_esxi_list[@]}"
+      for esxi_id in "${!my_config_esxi_list[@]}"
       do
         if [ ! -v my_all_params[${esxi_id}.${config_parameter}] ]
         then
@@ -715,7 +715,7 @@ function parse_ini_file {
           then
             error \
               "Problem in configuration file:" \
-              "The empty value of required '${config_parameter}' parameter at '${my_esxi_list[${esxi_id}]}' esxi instance definition" \
+              "The empty value of required '${config_parameter}' parameter at '${my_config_esxi_list[${esxi_id}]}' esxi instance definition" \
               "Please fill the value of parameter and try again"
           fi
 
@@ -726,13 +726,13 @@ function parse_ini_file {
     then
       # Overriden the parameter name without prefix
       config_parameter="${BASH_REMATCH[1]}"
-      for vm_id in "${!my_vm_list[@]}"
+      for vm_id in "${!my_config_vm_list[@]}"
       do
         if [ ! -v my_all_params[${vm_id}.at] ]
         then
           error \
             "Problem in configuration file:" \
-            "The virtual machine '${my_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
+            "The virtual machine '${my_config_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
             "Please add the 'at' definition and try again"
         fi
 
@@ -751,7 +751,7 @@ function parse_ini_file {
           then
             error \
               "Problem in configuration file:" \
-              "The empty value of required '${config_parameter}' parameter at '${my_vm_list[$vm_id]}' virtual machine definition" \
+              "The empty value of required '${config_parameter}' parameter at '${my_config_vm_list[$vm_id]}' virtual machine definition" \
               "Please fill the value of parameter and try again"
           fi
 
@@ -803,9 +803,9 @@ function parse_args_list {
       continue
     fi
 
-    for vm_id in "${!my_vm_list[@]}"
+    for vm_id in "${!my_config_vm_list[@]}"
     do
-      vm_name="${my_vm_list[${vm_id}]}"
+      vm_name="${my_config_vm_list[${vm_id}]}"
       if [ "${arg_name}" = "${vm_name}" ]
       then
         if [ ! -v vm_ids[${vm_id}] ]
@@ -821,12 +821,12 @@ function parse_args_list {
       fi
     done
 
-    for esxi_id in "${!my_esxi_list[@]}"
+    for esxi_id in "${!my_config_esxi_list[@]}"
     do
-      esxi_name="${my_esxi_list[${esxi_id}]}"
+      esxi_name="${my_config_esxi_list[${esxi_id}]}"
       if [ "${arg_name}" = "${esxi_name}" ]
       then
-        for vm_id in "${!my_vm_list[@]}"
+        for vm_id in "${!my_config_vm_list[@]}"
         do
           if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" \
                -a ! -v vm_ids[${vm_id}] ]
@@ -1061,8 +1061,8 @@ function show_processed_vm_status {
     for vm_id in "${vm_ids_sorted[@]}"
     do
       esxi_id="${my_all_params[${vm_id}.at]}"
-      esxi_name="${my_esxi_list[${esxi_id}]}"
-      vm_name="${my_vm_list[${vm_id}]}"
+      esxi_name="${my_config_esxi_list[${esxi_id}]}"
+      vm_name="${my_config_vm_list[${vm_id}]}"
 
       if [ "${vm_id}" = "${aborted_vm_id}" \
            -a -z "${vm_ids[${vm_id}]}" ]
@@ -1168,7 +1168,8 @@ function command_create {
     else
       info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
     fi
-    get_esxi_vm_map "${!my_esxi_list[@]}"
+    get_esxi_vm_map \
+      "${!my_config_esxi_list[@]}"
   fi
 
   local -A \
@@ -1202,9 +1203,9 @@ function command_create {
 
   for vm_id in "${vm_ids_sorted[@]}"
   do
-    vm_name="${my_vm_list[${vm_id}]}"
+    vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_all_params[${vm_id}.at]}"
-    esxi_name="${my_esxi_list[${esxi_id}]}"
+    esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
     get_params "${vm_id}|${esxi_id}"
 
@@ -1234,7 +1235,7 @@ function command_create {
         else
           esxi_old_id="${BASH_REMATCH[1]}"
           esxi_old_vm_id="${BASH_REMATCH[2]}"
-          esxi_old_names[${esxi_old_id}]="${my_esxi_list[${esxi_old_id}]} (${my_all_params[${esxi_old_id}.esxi_hostname]})"
+          esxi_old_names[${esxi_old_id}]="${my_config_esxi_list[${esxi_old_id}]} (${my_all_params[${esxi_old_id}.esxi_hostname]})"
         fi
       fi
     done
@@ -1555,7 +1556,7 @@ function command_create {
 
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
-      vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_esxi_list[${esxi_old_id}]}' hypervisor)"
+      vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${esxi_old_id}]}' hypervisor)"
     fi
 
   done
@@ -1581,7 +1582,7 @@ function command_ls {
 
   parse_ini_file
 
-  if [ ${#my_esxi_list[@]} -lt 1 ]
+  if [ ${#my_config_esxi_list[@]} -lt 1 ]
   then
     warning \
       "The ESXi list is empty in configuration file" \
@@ -1602,7 +1603,7 @@ function command_ls {
   # And parse again with all virtual machines if the previous step return the empty list
   if [ "${#vm_ids[@]}" -lt 1 ]
   then
-    parse_args_list "${my_vm_list[@]}"
+    parse_args_list "${my_config_vm_list[@]}"
   fi
 
   check_dependencies
@@ -1648,7 +1649,7 @@ function command_ls {
   for esxi_id in "${!esxi_ids[@]}"
   do
     printf -- "${ping_status[${esxi_id}]}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
-      "${my_esxi_list[${esxi_id}]}" \
+      "${my_config_esxi_list[${esxi_id}]}" \
       "$(print_param esxi_ssh_username ${esxi_id})" \
       "$(print_param esxi_hostname ${esxi_id})" \
       "$(print_param esxi_ssh_port ${esxi_id})"
@@ -1659,7 +1660,7 @@ function command_ls {
       then
         printf -- "\n"
         printf -- "  ${ping_status[${vm_id}]}%s${COLOR_NORMAL} (%s@%s:%s) [%s]:\n" \
-          "${my_vm_list[${vm_id}]}" \
+          "${my_config_vm_list[${vm_id}]}" \
           "$(print_param vm_ssh_username ${vm_id})" \
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
@@ -1683,9 +1684,9 @@ function command_ls {
   done
   printf -- "Total: %d (of %d) hypervisor(s) and %d (of %d) virtual machine(s) them displayed\n" \
     "${#esxi_ids[@]}" \
-    "${#my_esxi_list[@]}" \
+    "${#my_config_esxi_list[@]}" \
     "${#vm_ids[@]}" \
-    "${#my_vm_list[@]}"
+    "${#my_config_vm_list[@]}"
   exit 0
 }
 
