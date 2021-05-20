@@ -3,11 +3,13 @@
 # Script for simply control (create/start/stop/remove) of virtual machines on ESXi
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_DEPENDENCIES=("mktemp" "scp" "sort" "ssh" "sshpass" "ping")
+MY_DEPENDENCIES=("mktemp" "rm" "scp" "sort" "ssh" "sshpass" "stat" "ping")
 MY_NAME="Script for simply control of virtual machines on ESXi"
-MY_VARIABLES=("ESXI_CONFIG_PATH")
+MY_VARIABLES=("CACHE_DIR" "CACHE_VALID" "ESXI_CONFIG_PATH")
 MY_VERSION="2.210512"
 
+CACHE_DIR="${CACHE_DIR:-"${0%/*}/cache"}"
+CACHE_VALID="${CACHE_VALID:-3600}" # 1 hour
 ESXI_CONFIG_PATH="${CONFIG_PATH:-"${0%.sh}.ini"}"
 
 my_name="${0}"
@@ -15,7 +17,7 @@ my_dir="${0%/*}"
 
 # my_all_params - associative array with all params from configuration file
 #                 the first number of the index name is the resource number, the digit "0" is reserved for default settings
-#                 other resource numbers will be referenced in my_config_esxi_list and my_config_vm_list associative arrays
+#                 other resource numbers will be referenced in my_*_esxi_list and my_*_vm_list associative arrays
 # for example:
 #
 # my_all_params=(
@@ -36,7 +38,10 @@ declare -A \
   my_all_params=() \
   my_flags=() \
   my_config_esxi_list=() \
-  my_config_vm_list=()
+  my_config_vm_list=() \
+  my_real_vm_list=()
+declare \
+  my_all_params_count=0
 
 # Init default values
 my_all_params=(
@@ -74,6 +79,40 @@ fi
 #
 ### Auxiliary functions
 #
+
+# The function to check cache parameters
+#
+#  Input: ${CACHE_DIR}   - The directory for saving cache file
+#         ${CACHE_VALID} - The seconds amount while cache file is valid
+# Return: 0              - Check is complete
+#
+function check_cache_params {
+  progress "Checking cache parameters"
+
+  if [ "${CACHE_DIR}" = "-" ]
+  then
+    echo -en "${COLOR_GRAY}"
+    echo "    Use temporary directory '${temp_dir}' as cache directory (because CACHE_DIR=\"-\" specified)"
+    echo -en "${COLOR_NORMAL}"
+    CACHE_DIR="${temp_dir}"
+  elif [ ! -d "${CACHE_DIR}" ]
+  then
+    error \
+      "The directory for caching '${CACHE_DIR}' is not exists" \
+      "Please check of it existance, create if needed and try again"
+  elif [[    "${CACHE_VALID}" =~ ^[[:digit:]]+$
+          && "${CACHE_VALID}" -ge 0
+          && "${CACHE_VALID}" -le 43200 ]]
+  then
+    :
+  else
+    error \
+      "The 'CACHE_VALID' environment variable must be a number from 0 to 43200, not '${CACHE_VALID}'" \
+      "Please correct it value and try again"
+  fi
+
+  return 0
+}
 
 # The function for checking virtual machine parameters values
 #
@@ -129,22 +168,36 @@ function check_vm_params {
 
 # Function to run simple operation on virtual machine
 #
-# Input:  ${1}        - The virtual machine operation: 'destroy', 'power on', 'power off' or 'power shutdown'
-#         ${2}        - The virtual machine identified on hypervisor
-#         ${3}        - The hypervisor identifier at ${my_esxi_list} array
-#         ${temp_dir} - The temporary directory to save commands outputs
-# Return:             - Status from run_remote_command() function
+# Input:  ${1}                      - The virtual machine operation: 'destroy', 'power on', 'power off' or 'power shutdown'
+#         ${2}                      - The virtual machine identified on hypervisor
+#         ${3}                      - The hypervisor identifier at ${my_config_esxi_list} array
+#         ${temp_dir}               - The temporary directory to save commands outputs
+#         ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
+#                                     {esxi_or_vm_identifier}.{parameter_name}
+#                                     Values - value of parameter
+#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
+#                                     Values - the name of esxi
+# Return: 0                         - If simple operation is successful
+#         another                   - In other cases
 #
 function esxi_vm_simple_command {
-  function esxi_get_vm_state {
-    local esxi_vm_id="${1}"
 
+  # Function to get virtual machine status
+  #
+  # Input:  ${esxi_ssh_destination[@]}  - Values - connection parameters to esxi
+  #         ${esxi_name}                - The name of esxi instance
+  #         ${vm_esxi_id}               - The virtual machine indentifier on esxi instance
+  #         ${vm_state_filepath}        - The path to temporary state file
+  # Modify: ${vm_state}                 - The state of virtual machine ('Present', 'Absent', 'Powered on', 'Powered off')
+  # Return: 0                           - If virtual machine status is getted successfully
+  #         another                     - In other cases
+  function esxi_get_vm_state {
     run_remote_command \
     >"${vm_state_filepath}" \
       "ssh" \
       "${esxi_ssh_destination[@]}" \
       "set -o pipefail" \
-      "vim-cmd vmsvc/getallvms | awk 'BEGIN { state=\"Absent\"; } \$1 == \"${esxi_vm_id}\" { state=\"Present\"; } END { print state; }'" \
+      "vim-cmd vmsvc/getallvms | awk 'BEGIN { state=\"Absent\"; } \$1 == \"${vm_esxi_id}\" { state=\"Present\"; } END { print state; }'" \
       "|| Failed to get virtual machine presence on '${esxi_name}' hypervisor (vim-cmd vmsvc/getallvms)" \
     || return 1
 
@@ -170,7 +223,7 @@ function esxi_vm_simple_command {
         "ssh" \
         "${esxi_ssh_destination[@]}" \
         "set -o pipefail" \
-        "vim-cmd vmsvc/power.getstate \"${esxi_vm_id}\" | awk 'NR == 2 { print \$0; }'" \
+        "vim-cmd vmsvc/power.getstate \"${vm_esxi_id}\" | awk 'NR == 2 { print \$0; }'" \
         "|| Failed to get virtual machine power status on '${esxi_name}' hypervisor (vim-cmd vmsvc/power.getstatus)" \
       || return 1
 
@@ -195,7 +248,7 @@ function esxi_vm_simple_command {
 
   local \
     esxi_vm_operation="${1}" \
-    esxi_vm_id="${2}" \
+    vm_esxi_id="${2}" \
     esxi_id="${3}"
 
   if [    "${esxi_vm_operation}" != "destroy" \
@@ -228,7 +281,6 @@ function esxi_vm_simple_command {
   progress "${esxi_vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})"
 
   esxi_get_vm_state \
-    "${esxi_vm_id}" \
   || return 1
 
   if [ "${vm_state}" = "Absent" ]
@@ -258,17 +310,22 @@ function esxi_vm_simple_command {
   run_remote_command \
     "ssh" \
     "${esxi_ssh_destination[@]}" \
-    "vim-cmd vmsvc/${esxi_vm_operation// /.} \"${esxi_vm_id}\" >/dev/null" \
+    "vim-cmd vmsvc/${esxi_vm_operation// /.} \"${vm_esxi_id}\" >/dev/null" \
     "|| Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})" \
   || return 1
 
-  local attempts=10
+  if [ "${esxi_vm_operation}" = "destroy" ]
+  then
+    remove_cachefile_for "${esxi_id}"
+  fi
+
+  local \
+    attempts=10
 
   if ! \
     until
       sleep 5;
       esxi_get_vm_state \
-        "${esxi_vm_id}" \
       || return 1;
       [ ${attempts} -lt 1 ] \
       || [ "${esxi_vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
@@ -290,51 +347,215 @@ function esxi_vm_simple_command {
   return 0
 }
 
+# The function for retrieve the cachefile path for specified esxi_id or real_vm_id
+#
+#  Input: ${1}                      - The esxi_id or real_vm_id for which function the retrieve the actual cachefile path
+#         ${CACHE_DIR}              - The directory for storing cache files
+#         ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
+#                                     {esxi_or_vm_identifier}.{parameter_name}
+#                                     Values - value of parameter
+#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
+#                                     Values - the name of esxi
+#         ${my_real_vm_list[@]}     - Keys - identifier of real virtual machine (actual sequence number)
+#                                     Values - the name of real virtual machine
+# Output: >&1                       - The actual path to cachefile
+# Return: 0                         - The cachefile path is returned correctly
+#
+function get_cachefile_path_for {
+  local \
+    cachefile_for="${1}" \
+    esxi_id=""
+
+  if [ -v my_config_esxi_list[${cachefile_for}] ]
+  then
+    esxi_id="${cachefile_for}"
+    cachefile_for="esxi"
+  elif [ -v my_real_vm_list[${cachefile_for}] ]
+  then
+    esxi_id="${my_all_params[${cachefile_for}.at]}"
+  else
+    internal \
+      "The unknown \${cachefile_for}=\"${cachefile_for}\" specified" \
+      "This value not exists on \${my_config_esxi_list[@]} and \${my_real_vm_list[@]} arrays"
+  fi
+
+  local \
+    esxi_name="${my_config_esxi_list[${esxi_id}]}" \
+    esxi_hostname="${my_all_params[${esxi_id}.esxi_hostname]}"
+  local \
+    cachefile_basepath="${CACHE_DIR}/esxi-${esxi_name}-${esxi_hostname}"
+
+  if [ "${cachefile_for}" = "esxi" ]
+  then
+    echo "${cachefile_basepath}/vms.map"
+  else
+    vm_name="${my_real_vm_list[${cachefile_for}]}"
+    vm_esxi_id="${my_all_params[${cachefile_for.vm_esxi_id}]}"
+    echo "${cachefile_basepath}/vm-${vm_name}-${vm_esxi_id}.vmx"
+  fi
+
+  return 0
+}
+
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
-#  Input: ${@}                  - The list esxi'es identifiers to
-#         ${temp_dir}           - The temporary directory to save commands outputs
-# Modify: ${esxi_vm_map[@]}     - Values - virtual machines identifiers in next format:
-#                                 {esxi_id}.{vm_id_on_esxi}.{vm_name}
-#         ${esxi_alive_list[@]} - Keys - esxi'es identifiers, Values - "yes" string
-# Return: 0                     - Always
+#  Input: ${CACHE_DIR}          - The directory for saving cache files
+#         ${CACHE_VALID}        - The seconds from now time while the cache file is valid
+#         ${@}                  - The list esxi'es identifiers to
+#         ${temp_dir}           - The temporary directory to save cache files if CACHE_DIR="-"
+# Modify: ${my_all_params[@]}   - Keys - parameter name with identifier of build in next format:
+#                                 {esxi_or_vm_identifier}.{parameter_name}
+#                                 Values - value of parameter
+#         ${my_real_vm_list[@]} - Keys - identifier of virtual machine (actual sequence number)
+#                                 Values - the name of virtual machine
+# Return: 0                     - The retrieving information is complete successful
 #
-function get_esxi_vm_map {
+function get_real_vm_list {
+
+  # The fucntion to update or not the cache file
+  #
+  #  Input:  ${1}           - The path to cache file
+  #          others         - The same as for 'run_remote_command' parameters
+  #          ${CACHE_VALID} - The time in seconds while a cache file is valid
+  #  Return: 0              - Always
+  #
+  function update_cachefile {
+    local \
+      cachefile_path="${1}" \
+      cachefile_dir="" \
+      cachefile_mtime=""
+    shift
+
+    if [    -f "${cachefile_path}" \
+         -a -s "${cachefile_path}" ]
+    then
+      if ! \
+        cachefile_mtime=$(
+          stat \
+            --format "%Y" \
+            "${cachefile_path}"
+        )
+      then
+        warning \
+          "Cannot get the status of cache file '${cachefile_path}'" \
+          "Please check file permissions or just remove this file and try again"
+      fi
+
+      if [ $((`printf "%(%s)T"`-cachefile_mtime)) -ge "${CACHE_VALID}" ]
+      then
+        if ! rm "${cachefile_path}"
+        then
+          warning \
+            "Cannot the remove the old cache file '${cachefile_path}'" \
+            "Please check file permissions or just remove this file and try again"
+        fi
+      fi
+    fi
+
+    if [    -f "${cachefile_path}" \
+         -a -s "${cachefile_path}" ]
+    then
+      echo "    Use the cache file '${cachefile_path}"
+    else
+      echo "    Write the cache file '${cachefile_path}'"
+
+      cachefile_dir="${cachefile_path%/*}"
+      if ! \
+        mkdir \
+          --parents \
+          "${cachefile_dir}"
+      then
+        warning \
+          "Failed to create directory '${cachefile_dir}' for saving cache files" \
+          "Please check file permissions or just remove this file and try again"
+      fi
+
+      run_remote_command \
+      >"${cachefile_path}" \
+        "${@}" \
+      || true
+    fi
+
+    return 0
+  }
+
   local -A \
     params=()
   local \
     esxi_id="" \
     esxi_name="" \
-    vm_id="" \
-    vm_map_filepath="${temp_dir}/vm_map"
+    vm_esxi_id="" \
+    vm_name="" \
+    vm_map_str="" \
+    vm_map_filepath="" \
+    vm_map_file_mtime=""
+    vmx_filepath="" \
+    vmx_esxi_filepath=""
 
-  esxi_vm_map=()
-  esxi_alive_list=()
   for esxi_id in "${@}"
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
     progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd)"
 
     get_params "${esxi_id}"
+    vm_map_filepath=$(
+      get_cachefile_path_for "${esxi_id}"
+    )
 
-    if ! \
-        run_remote_command \
-        >"${vm_map_filepath}" \
-          "ssh" \
-          "${params[esxi_ssh_username]}" \
-          "${params[esxi_ssh_password]}" \
-          "${params[esxi_hostname]}" \
-          "${params[esxi_ssh_port]}" \
-          "type -f awk cat mkdir vim-cmd >/dev/null" \
-          "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
-          "all_vms=\$(vim-cmd vmsvc/getallvms)" \
-          "|| Cannot get list of virtual machines on hypervisor (vim-cmd)" \
-          "awk '\$1!=\"Vmid\" {print \$1 \".\" \$2;}' <<EOF
-\${all_vms}
-EOF
-" \
-          "|| Failed to get virtual machine ID on hypervisor (awk)"
+    update_cachefile \
+      "${vm_map_filepath}" \
+      "ssh" \
+      "${params[esxi_ssh_username]}" \
+      "${params[esxi_ssh_password]}" \
+      "${params[esxi_hostname]}" \
+      "${params[esxi_ssh_port]}" \
+      "type -f awk cat mkdir vim-cmd >/dev/null" \
+      "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
+      "vim-cmd vmsvc/getallvms" \
+      "|| Cannot get list of virtual machines on hypervisor (vim-cmd)"
+
+    if [    -f "${vm_map_filepath}" \
+         -a -s "${vm_map_filepath}" ]
     then
+      my_all_params[${esxi_id}.alive]="yes"
+
+      while \
+        read -r \
+          -u 5 \
+          vm_map_str
+      do
+        if [[ "${vm_map_str}" =~ ^"Vmid " ]]
+        then
+          continue
+        elif [[ "${vm_map_str}" =~ ^([[:digit:]]+)[[:blank:]]+([[:alnum:]_\.\-]+)[[:blank:]]+\[([[:alnum:]_\.\-]+)\][[:blank:]]+([[:alnum:]_\/\.\-]+\.vmx)[[:blank:]]+(.*)$ ]]
+        then
+          vm_esxi_id="${BASH_REMATCH[1]}"
+          vm_name="${BASH_REMATCH[2]}"
+
+          let my_all_params_count+=1
+          my_real_vm_list[${my_all_params_count}]="${vm_name}"
+          my_all_params[${my_all_params_count}.vm_esxi_id]="${vm_esxi_id}"
+          my_all_params[${my_all_params_count}.at]="${esxi_id}"
+          # vm_vmx_filepath="/vmfs/volumes/${BASH_REMATCH[3]}/${BASH_REMATCH[4]}"
+          # vmx_filepath="${cache_basedir}/vm-${vm_id}-${vm_name}.vmx"
+
+          # update_cachefile \
+          #   "${vmx_filepath}" \
+          #   "ssh" \
+          #   "${params[esxi_ssh_username]}" \
+          #   "${params[esxi_ssh_password]}" \
+          #   "${params[esxi_hostname]}" \
+          #   "${params[esxi_ssh_port]}" \
+          #   "cat \"${vm_vmx_filepath}\"" \
+          #   "|| Cannot get the VMX file content (cat)"
+        else
+          error \
+            "Cannot parse the '${vm_map_str}' string obtained from hypervisor" \
+            "Let a maintainer know or solve the problem yourself"
+        fi
+      done \
+      5<"${vm_map_filepath}"
+    else
       if [ "${my_flags[skip_availability_check]}" = "yes" ]
       then
         continue
@@ -352,22 +573,6 @@ EOF
       fi
     fi
 
-    esxi_alive_list[${esxi_id}]="yes"
-
-    while read vm_id
-    do
-      if [[ "${vm_id}" =~ ^[[:digit:]]+\.[[:alnum:]_\.\-]+$ ]]
-      then
-        esxi_vm_map+=(
-          "${esxi_id}.${vm_id}"
-        )
-      else
-        error \
-          "Cannot parse the '${vm_id}' string obtained from hypervisor" \
-          "Let a maintainer know or solve the problem yourself"
-      fi
-    done \
-    <"${vm_map_filepath}"
   done
 
   return 0
@@ -497,7 +702,6 @@ function parse_ini_file {
     default_value="" \
     esxi_id="" \
     section_name="" \
-    resource_id=0 \
     vm_id="" \
     use_previous_resource="" \
 
@@ -576,7 +780,7 @@ function parse_ini_file {
           "Wrong name '${config_resource_name}' for INI-resource, must consist of characters (in regex notation): [[:alnum:]_.-]" \
           "Please correct the name and try again"
       else
-        let resource_id+=1
+        let my_all_params_count+=1
         case "${section_name}"
         in
           "esxi_list" )
@@ -589,7 +793,7 @@ function parse_ini_file {
                 "The duplicate esxi definiton '${config_resource_name}'" \
                 "Please remove or correct its name and try again"
             else
-              my_config_esxi_list[${resource_id}]="${config_resource_name}"
+              my_config_esxi_list[${my_all_params_count}]="${config_resource_name}"
             fi
             ;;
           "vm_list" )
@@ -610,7 +814,7 @@ function parse_ini_file {
                 "The definition '${config_resource_name}' already used in [esxi_list] section" \
                 "Please use different names for virtual machines and hypervisors"
             else
-              my_config_vm_list[${resource_id}]="${config_resource_name}"
+              my_config_vm_list[${my_all_params_count}]="${config_resource_name}"
             fi
             ;;
           * )
@@ -642,8 +846,8 @@ function parse_ini_file {
           error_config \
             "The unknown INI-parameter name '${config_parameter}'" \
             "Please correct (correct names specified at ${config_path}.example) and try again"
-        elif [    ${resource_id} -gt 0 \
-               -a -v my_all_params[${resource_id}.${config_parameter}] ]
+        elif [    ${my_all_params_count} -gt 0 \
+               -a -v my_all_params[${my_all_params_count}.${config_parameter}] ]
         then
           error_config \
             "The parameter '${config_parameter}' is already defined early" \
@@ -682,9 +886,9 @@ function parse_ini_file {
         check_param_value \
           "${config_parameter}" \
           "${config_value}"
-        my_all_params[${resource_id}.${config_parameter}]="${config_value}"
+        my_all_params[${my_all_params_count}.${config_parameter}]="${config_value}"
 
-        # If line ending with '\' symbol, associate the parameters from next line with current resource_id
+        # If line ending with '\' symbol, associate the parameters from next line with current my_all_params_count
         if [ "${config_parameters}" = "\\" ]
         then
           use_previous_resource="yes"
@@ -863,6 +1067,34 @@ function ping_host {
     -w 1 \
     "${1}" \
   &>/dev/null
+}
+
+# The function for removing the cachefile for specified esxi_id or real_vm_id
+#
+#  Input: ${1} - The esxi_id or real_vm_id for which cachefile will be removed
+# Return: 0    - The cachefile path is returned correctly
+#
+function remove_cachefile_for {
+  local \
+    cachefile_for="${1}" \
+    cachefile_path=""
+
+  cachefile_path=$(
+    get_cachefile_path_for "${cachefile_for}"
+  )
+
+  if [ -f "${cachefile_path}" ]
+  then
+    echo "    Remove the cache file \"${cachefile_path}\""
+    if ! \
+      rm "${cachefile_path}"
+    then
+      echo "    Failed to remove the cache file \"${cachefile_path}\", skipping"
+      remove_failed_cachefiles[${cachefile_for}]="${cachefile_path}"
+    fi
+  fi
+
+  return 0
 }
 
 # Function to run hook script
@@ -1084,6 +1316,30 @@ function show_processed_vm_status {
   return 0
 }
 
+# Function to print the remove failed cachefiles
+#
+#  Input: ${remove_failed_cachefiles[@]}  - Keys - esxi_id or real_vm_id, Values - the remove failed cachefile path
+# Return: 0                               - Always
+#
+function show_remove_failed_cachefiles {
+  local \
+    cachefile_path=""
+
+  if [ "${#remove_failed_cachefiles[@]}" -gt 0 ]
+  then
+    echo >&2 ""
+    echo >&2 -e "${COLOR_RED}!!! The next cache files failed to remove (see above for details):${COLOR_NORMAL}"
+    echo >&2 -e "(This files need to be removed ${COLOR_RED}manually${COLOR_NORMAL} for correct script working in future)"
+
+    for cachefile_path in "${remove_failed_cachefiles[@]}"
+    do
+      echo >&2 "  - ${cachefile_path}"
+    done
+  fi
+
+  return 0
+}
+
 # Function to print 'SKIPPING' message
 # and writing the 'SKIPPING' message in vm_ids[@] array
 #
@@ -1143,6 +1399,7 @@ function command_create {
 
   parse_args_list "${@}"
   check_dependencies
+  check_cache_params
 
   if [    "${my_flags[destroy_on_another]}" = "yes" \
        -a "${my_flags[skip_availability_check]}" = "yes" ]
@@ -1152,15 +1409,11 @@ function command_create {
       "because it's necessary to search for the virtual machine being destroyed on all hypervisors, and not on specific ones"
   fi
 
-  local -A \
-    esxi_alive_list=()
-  local \
-    esxi_vm_map=()
-
   if [ "${my_flags[skip_availability_check]}" = "yes" ]
   then
     info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
-    get_esxi_vm_map "${!esxi_ids[@]}"
+    get_real_vm_list \
+      "${!esxi_ids[@]}"
   else
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
@@ -1168,30 +1421,32 @@ function command_create {
     else
       info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
     fi
-    get_esxi_vm_map \
+    get_real_vm_list \
       "${!my_config_esxi_list[@]}"
   fi
 
   local -A \
-    esxi_old_names=() \
+    another_esxi_names=() \
     params=() \
+    remove_failed_cachefiles=() \
     vmx_params=()
   local \
     attempts=0 \
     no_pinging_vms=0 \
     runned_vms=0
   local \
+    another_esxi_id="" \
+    another_vm_esxi_id="" \
     esxi_id="" \
-    esxi_old_id="" \
-    esxi_old_vm_id="" \
     esxi_iso_dir="" \
     esxi_iso_path="" \
     esxi_name="" \
     esxi_ssh_destination=() \
-    esxi_vm_id="" \
     param="" \
+    real_vm_id="" \
     temp_file="" \
     vm_esxi_dir="" \
+    vm_esxi_id="" \
     vm_id="" \
     vm_id_filepath="" \
     vm_iso_filename="" \
@@ -1215,33 +1470,39 @@ function command_create {
     || continue
 
     # Checking the hypervisor liveness
-    if [ -v ${esxi_alive_list[${esxi_id}]} ]
+    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
     then
       skipping \
         "No connectivity to hypervisor (see virtual machine list preparation stage for details)"
       continue
     fi
 
-    esxi_old_names=()
-    esxi_vm_id=""
+    vm_esxi_id=""
+    another_esxi_names=()
     # Preparing the esxi list where the virtual machine is located
-    for vm_map in "${esxi_vm_map[@]}"
+    for real_vm_id in "${!my_real_vm_list[@]}"
     do
-      if [[ "${vm_map}" =~ ^([[:digit:]]+)\.([[:digit:]]+)\."${vm_name}"$ ]]
+      if [ "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
       then
-        if [ "${BASH_REMATCH[1]}" = "${esxi_id}" ]
+        if [ "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" ]
         then
-          esxi_vm_id="${BASH_REMATCH[2]}"
+          if [ -n "${vm_esxi_id}" ]
+          then
+            internal \
+              "The \${vm_esxi_id}='${vm_esxi_id}' is not impossible, because it already defined with value '${vm_esxi_id}'" \
+              "Something is wrong, please contact with maintainer"
+          fi
+          vm_esxi_id="${my_all_params[${real_vm_id}.vm_esxi_id]}"
         else
-          esxi_old_id="${BASH_REMATCH[1]}"
-          esxi_old_vm_id="${BASH_REMATCH[2]}"
-          esxi_old_names[${esxi_old_id}]="${my_config_esxi_list[${esxi_old_id}]} (${my_all_params[${esxi_old_id}.esxi_hostname]})"
+          another_esxi_id="${my_all_params[${real_vm_id}.at]}"
+          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_all_params[${another_esxi_id}.esxi_hostname]})"
+          another_vm_esxi_id="${my_all_params[${real_vm_id}.vm_esxi_id]}"
         fi
       fi
     done
 
     # Checking existance the virtual machine on another or this hypervisors
-    if [ -n "${esxi_vm_id}" \
+    if [ -n "${vm_esxi_id}" \
          -a "${my_flags[force]}" != "yes" ]
     then
       skipping \
@@ -1250,23 +1511,23 @@ function command_create {
       continue
     elif [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
-      if [ ${#esxi_old_names[@]} -lt 1 ]
+      if [ ${#another_esxi_names[@]} -lt 1 ]
       then
         # If a virtual machine is not found anywhere, then you do not need to destroy it
         my_flags[destroy_on_another]=""
-      elif [ "${#esxi_old_names[@]}" -gt 1 ]
+      elif [ "${#another_esxi_names[@]}" -gt 1 ]
       then
         skipping \
           "The virtual machine exists on more than one hypervisors" \
           "(That using the key '-d' gives the uncertainty of which virtual machine to destroy)"
-          "${esxi_old_names[@]/#/* }"
+          "${another_esxi_names[@]/#/* }"
         continue
       fi
-    elif [ ${#esxi_old_names[@]} -gt 0 ]
+    elif [ ${#another_esxi_names[@]} -gt 0 ]
     then
       skipping \
         "The virtual machine already exists on another hypervisor(s)" \
-        "${esxi_old_names[@]/#/* }"
+        "${another_esxi_names[@]/#/* }"
       continue
     fi
 
@@ -1305,18 +1566,17 @@ function command_create {
     fi
 
     vm_recreated=""
-    if [ -n "${esxi_vm_id}" \
+    if [ -n "${vm_esxi_id}" \
          -a "${my_flags[force]}" = "yes" ]
     then
       esxi_vm_simple_command \
         "power shutdown" \
-        "${esxi_vm_id}" \
+        "${vm_esxi_id}" \
         "${esxi_id}" \
       || continue
-
       esxi_vm_simple_command \
         "destroy" \
-        "${esxi_vm_id}" \
+        "${vm_esxi_id}" \
         "${esxi_id}" \
       || continue
 
@@ -1430,16 +1690,18 @@ function command_create {
       "|| Failed to register a virtual machine on hypervisor" \
     || continue
 
+    remove_cachefile_for "${esxi_id}"
+
     if ! \
-      esxi_vm_id=$(< "${vm_id_filepath}")
+      vm_esxi_id=$(< "${vm_id_filepath}")
     then
       skipping \
         "Failed to get virtual machine identifier from '${vm_id_filepath}' file"
       continue
-    elif [[ ! "${esxi_vm_id}" =~ ^[[:digit:]]+$ ]]
+    elif [[ ! "${vm_esxi_id}" =~ ^[[:digit:]]+$ ]]
     then
       skipping \
-        "The unknown the virtual machine identifier = '${esxi_vm_id}' getted from hypervisor" \
+        "The unknown the virtual machine identifier = '${vm_esxi_id}' getted from hypervisor" \
         "It must be a just number"
       continue
     fi
@@ -1448,15 +1710,15 @@ function command_create {
     then
       esxi_vm_simple_command \
         "power shutdown" \
-        "${esxi_old_vm_id}" \
-        "${esxi_old_id}" \
+        "${another_vm_esxi_id}" \
+        "${another_esxi_id}" \
       || continue
     fi
 
     if ! \
       esxi_vm_simple_command \
         "power on" \
-        "${esxi_vm_id}" \
+        "${vm_esxi_id}" \
         "${esxi_id}"
     then
       if [ "${my_flags[destroy_on_another]}" = "yes" ]
@@ -1464,8 +1726,8 @@ function command_create {
         if ! \
           esxi_vm_simple_command \
             "power on" \
-            "${esxi_old_vm_id}" \
-            "${esxi_old_id}"
+            "${another_vm_esxi_id}" \
+            "${another_esxi_id}"
         then
           vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see details above)"
           break
@@ -1495,7 +1757,7 @@ function command_create {
         if ! \
           esxi_vm_simple_command \
             "power shutdown" \
-            "${esxi_vm_id}" \
+            "${vm_esxi_id}" \
             "${esxi_id}"
         then
           vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to shutdown virtual machine, see details above)"
@@ -1505,8 +1767,8 @@ function command_create {
         if ! \
           esxi_vm_simple_command \
             "power on" \
-            "${esxi_old_vm_id}" \
-            "${esxi_old_id}"
+            "${another_vm_esxi_id}" \
+            "${another_esxi_id}"
         then
           vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see deatils above)"
           break
@@ -1531,8 +1793,8 @@ function command_create {
       if ! \
         esxi_vm_simple_command \
           "destroy" \
-          "${esxi_old_vm_id}" \
-          "${esxi_old_id}"
+          "${another_vm_esxi_id}" \
+          "${another_esxi_id}"
       then
         vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
         continue
@@ -1556,7 +1818,7 @@ function command_create {
 
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
-      vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${esxi_old_id}]}' hypervisor)"
+      vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
 
   done
@@ -1566,11 +1828,13 @@ function command_create {
   show_processed_vm_status
 
   echo >&2
-  printf "Total: %d created, %d created but no pinging, %d skipped virtual machines" \
+  printf "Total: %d created, %d created but no pinging, %d skipped virtual machines\n" \
     ${runned_vms} \
     ${no_pinging_vms} \
     $((${#vm_ids[@]}-runned_vms-no_pinging_vms)) \
   >&2
+
+  show_remove_failed_cachefiles
 }
 
 function command_ls {
@@ -1696,6 +1960,7 @@ function trap_sigint {
   if [ "${command_name}" != "ls" ]
   then
     show_processed_vm_status
+    show_remove_failed_cachefiles
   fi
   warning "Interrupted"
 }
