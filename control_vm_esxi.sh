@@ -1023,9 +1023,7 @@ function run_remote_command {
     then
       # Split one line description to array by '|' delimiter
       IFS="|" \
-      read \
-        -a error_description \
-      <<<"${error_codes_descriptions[${error_code_index}]}" \
+      error_description=(${error_codes_descriptions[${error_code_index}]}) \
       || internal
 
       skipping "${error_description[@]}"
