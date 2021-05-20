@@ -644,7 +644,7 @@ function parse_ini_file {
         ;;
       "vm_memory_mb" )
         [[    "${value}" =~ ^[[:digit:]]+$
-           && "${value}" -gt 1024
+           && "${value}" -ge 1024
            && "${value}" -le 32768 ]] \
         || \
           error="it must be a number from 1024 to 32768"
@@ -656,7 +656,7 @@ function parse_ini_file {
         ;;
       "vm_vcpus" )
         [[    "${value}" =~ ^[[:digit:]]+$
-           && "${value}" -gt 0
+           && "${value}" -ge 1
            && "${value}" -le 8 ]] \
         || \
           error="it must be a number from 1 to 8"
