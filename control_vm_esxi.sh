@@ -375,17 +375,19 @@ EOF
 
 # The function to parse configuration file
 #
-#  Input: ${1}                  - The path to configuration INI-file
-# Modify: ${my_all_params}      - Keys - parameter name with identifier of build in next format:
-#                                 {build_identifier}.{parameter_name}
-#                                 Values - value of parameter
-#         ${my_builds_list[@]}  - Keys - identifier of build (actual sequence number)
-#                                 Values - name of build from configuration file
-# Return: 0                     - The parse complete without errors
+#  Input: ${ESXI_CONFIG_PATH}       - The path to configuration INI-file
+# Modify: ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
+#                                     {esxi_or_vm_identifier}.{parameter_name}
+#                                     Values - value of parameter
+#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
+#                                     Values - the name of esxi
+#         ${my_config_vm_list[@]}   - Keys - identifier of virtual machine (actual sequence number)
+#                                     Values - the name of virtual machine
+# Return: 0                         - The parse complete without errors
 #
 function parse_ini_file {
   local \
-    config_path="${1}"
+    config_path="${ESXI_CONFIG_PATH}"
 
   function check_param_value {
     local \
@@ -1123,8 +1125,7 @@ function command_create {
     return 0
   fi
 
-  parse_ini_file \
-    "${ESXI_CONFIG_PATH}"
+  parse_ini_file
 
   local -A \
     esxi_ids=() \
@@ -1570,8 +1571,7 @@ function command_ls {
     return 0
   fi
 
-  parse_ini_file \
-    "${ESXI_CONFIG_PATH}"
+  parse_ini_file
 
   if [ ${#my_esxi_list[@]} -lt 1 ]
   then

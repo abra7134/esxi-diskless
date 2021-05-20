@@ -348,7 +348,7 @@ function parse_args_list {
 
 # The function to parse configuration file
 #
-#  Input: ${1}                  - The path to configuration INI-file
+#  Input: ${BUILD_CONFIG_PATH}  - The path to configuration INI-file
 # Modify: ${my_all_params}      - Keys - parameter name with identifier of build in next format:
 #                                 {build_identifier}.{parameter_name}
 #                                 Values - value of parameter
@@ -358,7 +358,7 @@ function parse_args_list {
 #
 function parse_ini_file {
   local \
-    config_path="${1}"
+    config_path="${BUILD_CONFIG_PATH}"
 
   function check_param_value {
     local \
@@ -637,9 +637,7 @@ function command_build {
   fi
 
   check_root_run
-
-  parse_ini_file \
-    "${BUILD_CONFIG_PATH}"
+  parse_ini_file
 
   local -A \
     builds_ids=()
@@ -944,7 +942,7 @@ function command_ls {
     return 0
   fi
 
-  parse_ini_file "${BUILD_CONFIG_PATH}"
+  parse_ini_file
 
   if [ ${#my_builds_list[@]} -lt 1 ]
   then
