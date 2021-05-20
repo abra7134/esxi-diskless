@@ -32,25 +32,25 @@
 # A list with all available parameters and their default values
 # (which will be used if not specified at all)
 [defaults]
-esxi_hostname=""
-esxi_ssh_password=""
-esxi_ssh_port=22
-esxi_ssh_username="root"
-local_hook_path=""
-local_iso_path=""
-vm_dns_servers="8.8.8.8 8.8.4.4"  # Separated by spaces
-vm_esxi_datastore="datastore1"
-vm_guest_type="debian8-64"
-vm_ipv4_address=""
-vm_ipv4_netmask="255.255.255.0"
-vm_ipv4_gateway=""
-vm_memory_mb=1024
-vm_network_name="VM Network"
-vm_ssh_password=""
-vm_ssh_port=22
-vm_ssh_username="root"
-vm_timezone="Etc/UTC"
-vm_vcpus=1
+#esxi_hostname=""                  # REQUIRED
+#esxi_ssh_password=""
+#esxi_ssh_port=22
+#esxi_ssh_username="root"
+#local_hook_path=""
+#local_iso_path=""                 # REQUIRED
+#vm_dns_servers="8.8.8.8 8.8.4.4"  # Separated by spaces
+#vm_esxi_datastore="datastore1"
+#vm_guest_type="debian8-64"
+#vm_ipv4_address=""                # REQUIRED
+#vm_ipv4_netmask="255.255.255.0"
+#vm_ipv4_gateway=""                # REQUIRED
+#vm_memory_mb=1024
+#vm_network_name="VM Network"
+#vm_ssh_password=""
+#vm_ssh_port=22
+#vm_ssh_username="root"
+#vm_timezone="Etc/UTC"
+#vm_vcpus=1
 
 [esxi_list]
 
