@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Script for simply control (create/start/stop/remove) of virtual machines on ESXi
+# Script for simply control (create/destroy/restart) of virtual machines on ESXi
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
 MY_DEPENDENCIES=("mktemp" "rm" "scp" "sort" "ssh" "sshpass" "stat" "ping")
@@ -39,6 +39,7 @@ declare -A \
   my_flags=() \
   my_config_esxi_list=() \
   my_config_vm_list=() \
+  my_params_map=() \
   my_real_vm_list=()
 declare \
   my_all_params_count=0
@@ -64,6 +65,22 @@ my_all_params=(
   [0.vm_ssh_username]="root"
   [0.vm_timezone]="Etc/UTC"
   [0.vm_vcpus]="1"
+)
+
+# The map of parameters between configuration file and esxi vmx file
+# The 'special.' prefix signals that the conversion is not direct
+my_params_map=(
+  [ethernet0.networkname]="vm_network_name"
+  [guestinfo.dns_servers]="vm_dns_servers"
+  [guestinfo.ipv4_address]="vm_ipv4_address"
+  [guestinfo.ipv4_netmask]="vm_ipv4_netmask"
+  [guestinfo.ipv4_gateway]="vm_ipv4_gateway"
+  [guestinfo.timezone]="vm_timezone"
+  [guestos]="vm_guest_type"
+  [memsize]="vm_memory_mb"
+  [numvcpus]="vm_vcpus"
+  [special.vm_esxi_datastore]="vm_esxi_datastore"
+  [special.local_iso_path]="local_iso_path"
 )
 
 set -o errexit
@@ -389,9 +406,10 @@ function get_cachefile_path_for {
   then
     echo "${cachefile_basepath}/vms.map"
   else
-    vm_name="${my_real_vm_list[${cachefile_for}]}"
-    vm_esxi_id="${my_all_params[${cachefile_for.vm_esxi_id}]}"
-    echo "${cachefile_basepath}/vm-${vm_name}-${vm_esxi_id}.vmx"
+    local \
+      vm_name="${my_real_vm_list[${cachefile_for}]}" \
+      vm_esxi_id="${my_all_params[${cachefile_for}.vm_esxi_id]}"
+    echo "${cachefile_basepath}/vm-${vm_esxi_id}-${vm_name}.vmx"
   fi
 
   return 0
@@ -399,6 +417,7 @@ function get_cachefile_path_for {
 
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
+#  Input: ${1}                  - The type of retrieving ('full' with vm parameters and 'simple')
 #  Input: ${CACHE_DIR}          - The directory for saving cache files
 #         ${CACHE_VALID}        - The seconds from now time while the cache file is valid
 #         ${@}                  - The list esxi'es identifiers to
@@ -411,18 +430,21 @@ function get_cachefile_path_for {
 # Return: 0                     - The retrieving information is complete successful
 #
 function get_real_vm_list {
+  local \
+    get_type="${1}"
+  shift
 
   # The fucntion to update or not the cache file
   #
   #  Input:  ${1}           - The path to cache file
   #          others         - The same as for 'run_remote_command' parameters
   #          ${CACHE_VALID} - The time in seconds while a cache file is valid
-  #  Return: 0              - Always
+  #  Return: 0              - If remote command is runned without errors
+  #          1              - Failed from 'run_remote_command' function
   #
   function update_cachefile {
     local \
       cachefile_path="${1}" \
-      cachefile_dir="" \
       cachefile_mtime=""
     shift
 
@@ -459,7 +481,8 @@ function get_real_vm_list {
     else
       echo "    Write the cache file '${cachefile_path}'"
 
-      cachefile_dir="${cachefile_path%/*}"
+      local \
+        cachefile_dir="${cachefile_path%/*}"
       if ! \
         mkdir \
           --parents \
@@ -473,7 +496,7 @@ function get_real_vm_list {
       run_remote_command \
       >"${cachefile_path}" \
         "${@}" \
-      || true
+      || return 1
     fi
 
     return 0
@@ -484,13 +507,17 @@ function get_real_vm_list {
   local \
     esxi_id="" \
     esxi_name="" \
+    map_str="" \
+    map_filepath="" \
+    real_vm_id="" \
     vm_esxi_id="" \
     vm_name="" \
-    vm_map_str="" \
-    vm_map_filepath="" \
-    vm_map_file_mtime=""
+    vm_vmx_filepath="" \
+    vmx_failed="" \
     vmx_filepath="" \
-    vmx_esxi_filepath=""
+    vmx_str="" \
+    vmx_param_name="" \
+    vmx_param_value=""
 
   for esxi_id in "${@}"
   do
@@ -498,12 +525,12 @@ function get_real_vm_list {
     progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd)"
 
     get_params "${esxi_id}"
-    vm_map_filepath=$(
+    map_filepath=$(
       get_cachefile_path_for "${esxi_id}"
     )
 
     update_cachefile \
-      "${vm_map_filepath}" \
+      "${map_filepath}" \
       "ssh" \
       "${params[esxi_ssh_username]}" \
       "${params[esxi_ssh_password]}" \
@@ -512,49 +539,103 @@ function get_real_vm_list {
       "type -f awk cat mkdir vim-cmd >/dev/null" \
       "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
       "vim-cmd vmsvc/getallvms" \
-      "|| Cannot get list of virtual machines on hypervisor (vim-cmd)"
+      "|| Cannot get list of virtual machines on hypervisor (vim-cmd)" \
+    || true
 
-    if [    -f "${vm_map_filepath}" \
-         -a -s "${vm_map_filepath}" ]
+    if [    -f "${map_filepath}" \
+         -a -s "${map_filepath}" ]
     then
       my_all_params[${esxi_id}.alive]="yes"
+      vmx_failed=""
 
       while \
         read -r \
           -u 5 \
-          vm_map_str
+          map_str
       do
-        if [[ "${vm_map_str}" =~ ^"Vmid " ]]
+        if [[ "${map_str}" =~ ^"Vmid " ]]
         then
           continue
-        elif [[ "${vm_map_str}" =~ ^([[:digit:]]+)[[:blank:]]+([[:alnum:]_\.\-]+)[[:blank:]]+\[([[:alnum:]_\.\-]+)\][[:blank:]]+([[:alnum:]_\/\.\-]+\.vmx)[[:blank:]]+(.*)$ ]]
+        elif [[ ! "${map_str}" =~ ^([[:digit:]]+)[[:blank:]]+([[:alnum:]_\.\-]+)[[:blank:]]+\[([[:alnum:]_\.\-]+)\][[:blank:]]+([[:alnum:]_\/\.\-]+\.vmx)[[:blank:]]+(.*)$ ]]
         then
-          vm_esxi_id="${BASH_REMATCH[1]}"
-          vm_name="${BASH_REMATCH[2]}"
-
-          let my_all_params_count+=1
-          my_real_vm_list[${my_all_params_count}]="${vm_name}"
-          my_all_params[${my_all_params_count}.vm_esxi_id]="${vm_esxi_id}"
-          my_all_params[${my_all_params_count}.at]="${esxi_id}"
-          # vm_vmx_filepath="/vmfs/volumes/${BASH_REMATCH[3]}/${BASH_REMATCH[4]}"
-          # vmx_filepath="${cache_basedir}/vm-${vm_id}-${vm_name}.vmx"
-
-          # update_cachefile \
-          #   "${vmx_filepath}" \
-          #   "ssh" \
-          #   "${params[esxi_ssh_username]}" \
-          #   "${params[esxi_ssh_password]}" \
-          #   "${params[esxi_hostname]}" \
-          #   "${params[esxi_ssh_port]}" \
-          #   "cat \"${vm_vmx_filepath}\"" \
-          #   "|| Cannot get the VMX file content (cat)"
-        else
           error \
-            "Cannot parse the '${vm_map_str}' string obtained from hypervisor" \
+            "Cannot parse the '${map_str}' string obtained from hypervisor" \
             "Let a maintainer know or solve the problem yourself"
         fi
+
+        vm_esxi_id="${BASH_REMATCH[1]}"
+        vm_name="${BASH_REMATCH[2]}"
+
+        let my_all_params_count+=1
+        real_vm_id="${my_all_params_count}"
+        my_real_vm_list[${real_vm_id}]="${vm_name}"
+        my_all_params[${real_vm_id}.vm_esxi_id]="${vm_esxi_id}"
+        my_all_params[${real_vm_id}.at]="${esxi_id}"
+
+        if [    "${get_type}" = "full" \
+             -a "${vmx_failed}" != "yes" ]
+        then
+          vm_vmx_filepath="/vmfs/volumes/${BASH_REMATCH[3]}/${BASH_REMATCH[4]}"
+          vmx_filepath=$(
+            get_cachefile_path_for "${real_vm_id}"
+          )
+
+          if ! \
+            update_cachefile \
+              "${vmx_filepath}" \
+              "ssh" \
+              "${params[esxi_ssh_username]}" \
+              "${params[esxi_ssh_password]}" \
+              "${params[esxi_hostname]}" \
+              "${params[esxi_ssh_port]}" \
+              "cat \"${vm_vmx_filepath}\"" \
+              "|| Cannot get the VMX file content (cat)"
+          then
+            vmx_failed="yes"
+            continue
+          fi
+
+          if [    -f "${vmx_filepath}" \
+               -a -s "${vmx_filepath}" ]
+          then
+            my_all_params[${real_vm_id}.vmx_parameters]="yes"
+
+            while \
+              read -r \
+                -u 6 \
+                vmx_str
+            do
+              if [[ "${vmx_str}" =~ ^([[:alnum:]_:\.]+)[[:blank:]]+=[[:blank:]]+\"(.*)\"$ ]]
+              then
+                vmx_param_name="${BASH_REMATCH[1]}"
+                if [ -v my_params_map[${vmx_param_name}] ]
+                then
+                  vmx_param_value="${BASH_REMATCH[2]}"
+                  my_all_params[${real_vm_id}.${vmx_param_name}]="${vmx_param_value}"
+                elif [ "${vmx_param_name}" = "ide0:0.fileName" ]
+                then
+                  vmx_param_value="${BASH_REMATCH[2]}"
+                  if [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)$ ]]
+                  then
+                    my_all_params[${real_vm_id}.special.vm_esxi_datastore]="${BASH_REMATCH[1]}"
+                    my_all_params[${real_vm_id}.special.local_iso_path]="${BASH_REMATCH[3]}"
+                  else
+                    error \
+                      "Cannot parse the ISO-image path '${vmx_param_value}' obtained from hypervisor vmx" \
+                      "Let a maintainer know or solve the problem yourself"
+                  fi
+                fi
+              else
+                error \
+                  "Cannot parse the '${vmx_str}' string obtained from hypervisor vmx" \
+                  "Let a maintainer know or solve the problem yourself"
+              fi
+            done \
+            6<"${vmx_filepath}"
+          fi
+        fi
       done \
-      5<"${vm_map_filepath}"
+      5<"${map_filepath}"
     else
       if [ "${my_flags[skip_availability_check]}" = "yes" ]
       then
@@ -562,6 +643,7 @@ function get_real_vm_list {
       else
         if [ "${my_flags[ignore_unavailable]}" = "yes" ]
         then
+          my_flags[unavailable_presence]="yes"
           continue
         else
           warning \
@@ -972,12 +1054,13 @@ function parse_ini_file {
 # and preparing 3 arrays with identifiers of encountered hypervisors and virtual machines,
 # and 1 array with flags for script operation controls
 #
-#  Input: ${@}                - List of flags, virtual machines names or hypervisors names
-# Modify: ${my_flags[@]}      - Keys - flags names, values - "yes" string
-#         ${esxi_ids[@]}      - Keys - identifiers of hypervisors, values - empty string
-#         ${vm_ids[@]}        - Keys - identifiers of virtual machines, values - empty string
-#         ${vm_ids_sorted[@]} - Values - identifiers of virtual machines in order of their indication
-# Return: 0                   - Always
+#  Input: ${@}                  - List of flags, virtual machines names or hypervisors names
+# Modify: ${my_flags[@]}        - Keys - flags names, values - "yes" string
+#         ${esxi_ids[@]}        - Keys - identifiers of hypervisors, values - empty string
+#         ${esxi_ids_sorted[@]} - Values - identifiers of hypervisors in order of their indication
+#         ${vm_ids[@]}          - Keys - identifiers of virtual machines, values - empty string
+#         ${vm_ids_sorted[@]}   - Values - identifiers of virtual machines in order of their indication
+# Return: 0                     - Always
 #
 function parse_args_list {
   local \
@@ -996,6 +1079,7 @@ function parse_args_list {
     )
 
   esxi_ids=()
+  esxi_ids_sorted=()
   vm_ids=()
   vm_ids_sorted=()
 
@@ -1014,12 +1098,19 @@ function parse_args_list {
       then
         if [ ! -v vm_ids[${vm_id}] ]
         then
-          esxi_id="${my_all_params[${vm_id}.at]}"
-          esxi_ids[${esxi_id}]=""
           vm_ids[${vm_id}]=""
           vm_ids_sorted+=(
             "${vm_id}"
           )
+
+          esxi_id="${my_all_params[${vm_id}.at]}"
+          if [ ! -v esxi_ids[${esxi_id}] ]
+          then
+            esxi_ids[${esxi_id}]=""
+            esxi_ids_sorted+=(
+              "${esxi_id}"
+            )
+          fi
         fi
         continue 2
       fi
@@ -1030,6 +1121,14 @@ function parse_args_list {
       esxi_name="${my_config_esxi_list[${esxi_id}]}"
       if [ "${arg_name}" = "${esxi_name}" ]
       then
+        if [ ! -v esxi_ids[${esxi_id}] ]
+        then
+          esxi_ids[${esxi_id}]=""
+          esxi_ids_sorted+=(
+            "${esxi_id}"
+          )
+        fi
+
         for vm_id in "${!my_config_vm_list[@]}"
         do
           if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" \
@@ -1041,7 +1140,6 @@ function parse_args_list {
             )
           fi
         done
-        esxi_ids[${esxi_id}]=""
         continue 2
       fi
     done
@@ -1255,9 +1353,10 @@ function run_remote_command {
     then
       # Split one line description to array by '|' delimiter
       IFS="|" \
-      error_description=(${error_codes_descriptions[${error_code_index}]}) \
+      read -r \
+        -a error_description \
+      <<<"${error_codes_descriptions[${error_code_index}]}" \
       || internal
-
       skipping "${error_description[@]}"
     else
       internal \
@@ -1375,7 +1474,7 @@ function command_create {
       "Please specify a virtual machine name or names to be created and runned" \
       "You can also specify hypervisor names on which all virtual machines will be created" \
       "" \
-      "Usage: ${my_name} ${command_name} [options] <vm_id> [<esxi_id>] [<vm_id>] ..." \
+      "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
       "" \
       "Options: -d  Destroy the same virtual machine on another hypervisor (migration analogue)" \
       "         -f  Recreate a virtual machine on destination hypervisor if it already exists" \
@@ -1395,6 +1494,7 @@ function command_create {
     esxi_ids=() \
     vm_ids=()
   local \
+    esxi_ids_sorted=() \
     vm_ids_sorted=()
 
   parse_args_list "${@}"
@@ -1413,6 +1513,7 @@ function command_create {
   then
     info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
     get_real_vm_list \
+      simple \
       "${!esxi_ids[@]}"
   else
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
@@ -1422,6 +1523,7 @@ function command_create {
       info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
     fi
     get_real_vm_list \
+      simple \
       "${!my_config_esxi_list[@]}"
   fi
 
@@ -1452,7 +1554,8 @@ function command_create {
     vm_iso_filename="" \
     vm_name="" \
     vm_recreated="" \
-    vmx_filepath=""
+    vmx_filepath="" \
+    vmx_params=""
 
   vm_id_filepath="${temp_dir}/vm_id"
 
@@ -1592,29 +1695,20 @@ function command_create {
       [config.version]="8"
       [displayname]="${vm_name}"
       [ethernet0.addresstype]="generated"
-      [ethernet0.networkname]="${params[vm_network_name]}"
       [ethernet0.pcislotnumber]="33"
       [ethernet0.present]="TRUE"
       [ethernet0.virtualdev]="vmxnet3"
       [extendedconfigfile]="${vm_name}.vmxf"
       [floppy0.present]="FALSE"
-      [guestos]="${params[vm_guest_type]}"
-      [guestinfo.dns_servers]="${params[vm_dns_servers]}"
       [guestinfo.hostname]="${vm_name}"
-      [guestinfo.ipv4_address]="${params[vm_ipv4_address]}"
-      [guestinfo.ipv4_netmask]="${params[vm_ipv4_netmask]}"
-      [guestinfo.ipv4_gateway]="${params[vm_ipv4_gateway]}"
-      [guestinfo.timezone]="${params[vm_timezone]}"
       [hpet0.present]="TRUE"
       [ide0:0.deviceType]="cdrom-image"
       [ide0:0.fileName]="${esxi_iso_path}"
       [ide0:0.present]="TRUE"
       [ide0:0.startConnected]="TRUE"
       [mem.hotadd]="TRUE"
-      [memsize]="${params[vm_memory_mb]}"
       [msg.autoanswer]="true"
       [nvram]="${vm_name}.nvram"
-      [numvcpus]="${params[vm_vcpus]}"
       [pcibridge0.present]="TRUE"
       [pcibridge4.functions]="8"
       [pcibridge4.present]="TRUE"
@@ -1637,10 +1731,10 @@ function command_create {
       [sched.cpu.min]="0"
       [sched.cpu.shares]="normal"
       [sched.cpu.units]="mhz"
-      [sched.mem.min]="${params[vm_memory_mb]}"
-      [sched.mem.minSize]="${params[vm_memory_mb]}"
       [sched.mem.pin]="TRUE"
       [sched.mem.shares]="normal"
+      [sched.mem.min]="${params[vm_memory_mb]}"
+      [sched.mem.minSize]="${params[vm_memory_mb]}"
       [sched.scsi0:0.shares]="normal"
       [sched.scsi0:0.throughputCap]="off"
       [sched.swap.vmxSwapEnabled]="FALSE"
@@ -1653,6 +1747,16 @@ function command_create {
       [virtualhw.version]="11"
       [vmci0.present]="TRUE"
     )
+    # And adding values from the parameters map
+    for vmx_param in "${!my_params_map[@]}"
+    do
+      # Write only it parameter name not starts with 'special.' prefix
+      if [ "${vmx_param#special.}" = "${vmx_param}" ]
+      then
+        vmx_params[${vmx_param}]="${params[${my_params_map[${vmx_param}]}]}"
+      fi
+    done
+
     vmx_filepath="${temp_dir}/${vm_name}.vmx"
     for param in "${!vmx_params[@]}"
     do
@@ -1857,6 +1961,7 @@ function command_ls {
     esxi_ids=() \
     vm_ids=()
   local \
+    esxi_ids_sorted=() \
     vm_ids_sorted=()
 
   # Parse args list if it not empty
@@ -1953,17 +2058,292 @@ function command_ls {
     "${#my_config_esxi_list[@]}" \
     "${#vm_ids[@]}" \
     "${#my_config_vm_list[@]}"
+  printf -- "\n"
+  exit 0
+}
+
+function command_show {
+  if [ -z "${1}" ]
+  then
+    warning \
+      "Please specify a hypervisor name or names for which will show differences" \
+      "You can also specify virtual machines names on necessary hypervisors to translate" \
+      "" \
+      "Usage: ${my_name} ${command_name} [options] <esxi_name> [<vm_name>] [<esxi_name>] ..." \
+      "" \
+      "Options: -i  Do not stop the script if any of hypervisors are not available" \
+      "         -n  Skip virtual machine map build from all hypervisors" \
+      "" \
+      "Available names can be viewed using the '${my_name} ls' command"
+  elif [ "${1}" = "description" ]
+  then
+    echo "Show the difference between the configuration file and the real situation"
+    return 0
+  fi
+
+  parse_ini_file
+
+  local -A \
+    esxi_ids=() \
+    vm_ids=()
+  local \
+    esxi_ids_sorted=() \
+    vm_ids_sorted=()
+
+  parse_args_list "${@}"
+  check_dependencies
+  check_cache_params
+
+  if [ "${my_flags[skip_availability_check]}" = "yes" ]
+  then
+    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
+    get_real_vm_list \
+      full \
+      "${!esxi_ids[@]}"
+  else
+    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
+    get_real_vm_list \
+      full \
+      "${!my_config_esxi_list[@]}"
+  fi
+
+  progress "Completed"
+
+  echo -e "${COLOR_NORMAL}"
+  echo "Showing differences:"
+  echo -e "(virtual machine names are ${COLOR_WHITE}highlighted${COLOR_NORMAL} when specified explicitly or indirectly on the command line)"
+  echo
+
+  local -A \
+    config_vm_ids=() \
+    real_vm_ids=()
+  local \
+    color_alive="" \
+    color_difference="" \
+    color_selected="" \
+    column_width=25 \
+    config_param="" \
+    config_value="" \
+    config_vm_id="" \
+    esxi_id="" \
+    esxi_name="" \
+    real_value="" \
+    real_vm_id="" \
+    separator_line="" \
+    vm_id="" \
+    vm_name="" \
+    vmx_param=""
+
+  # Prepare a ${separator_line} with small hack of printf
+  # (analogue of python's string multiplicate 'str * 10')
+  eval \
+    printf \
+    -v separator_line \
+    -- \
+    "-%.0s" \
+    {1..$((column_width+2))}
+  separator_line="${separator_line}+${separator_line}+${separator_line}"
+
+  for esxi_id in "${esxi_ids_sorted[@]}"
+  do
+    esxi_name="${my_config_esxi_list[${esxi_id}]}"
+
+    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
+    then
+      color_alive="${COLOR_RED}"
+    else
+      color_alive="${COLOR_GREEN}"
+    fi
+
+    printf -- "${color_alive}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
+      "${esxi_name}" \
+      "$(print_param esxi_ssh_username ${esxi_id})" \
+      "$(print_param esxi_hostname ${esxi_id})" \
+      "$(print_param esxi_ssh_port ${esxi_id})"
+
+    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
+    then
+      echo
+      echo "  No connectivity to hypervisor (see details above)"
+      echo
+      continue
+    fi
+
+    real_vm_ids=()
+    config_vm_ids=()
+
+    for vm_id in \
+      "${!my_config_vm_list[@]}" \
+      "${!my_real_vm_list[@]}"
+    do
+      if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" ]
+      then
+        if [ -v my_all_params[${vm_id}.vm_esxi_id] ]
+        then
+          real_vm_ids[${vm_id}]=""
+          vm_name="${my_real_vm_list[${vm_id}]}"
+        else
+          config_vm_ids[${vm_id}]=""
+          vm_name="${my_config_vm_list[${vm_id}]}"
+        fi
+
+        for real_vm_id in "${!my_real_vm_list[@]}"
+        do
+          if [ "${vm_name}" = "${my_real_vm_list[${real_vm_id}]}" ]
+          then
+            if [ -v my_all_params[${vm_id}.vm_esxi_id] ]
+            then
+              if [    "${my_all_params[${real_vm_id}.at]}" != "${esxi_id}" \
+                   -a "${vm_id}" != "${real_vm_id}" ]
+              then
+                real_vm_ids[${vm_id}]+="${real_vm_ids[${vm_id}]:+, }'${my_config_esxi_list[${my_all_params[${real_vm_id}.at]}]}'"
+              fi
+            else
+              if [ "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" ]
+              then
+                my_all_params[${vm_id}.real_vm_ids]+="${real_vm_id} "
+              else
+                config_vm_ids[${vm_id}]+="${config_vm_ids[${vm_id}]:+, }'${my_config_esxi_list[${my_all_params[${real_vm_id}.at]}]}'"
+              fi
+            fi
+          fi
+        done
+      fi
+    done
+
+    printf -- "\n"
+    printf -- "   %-${column_width}s | %-${column_width}s | %-${column_width}s\n" \
+      "In configuration file:" \
+      "On hypervisor:" \
+      "Also finded on"
+    printf -- "   %-${column_width}s | %-${column_width}s | %-${column_width}s\n" \
+      "(${#config_vm_ids[@]} virtual machines)" \
+      "(${#real_vm_ids[@]} virtual machines)" \
+      "another hypervisors:"
+    printf -- "  ${separator_line}\n"
+
+    for config_vm_id in "${!config_vm_ids[@]}"
+    do
+      if [ -n "${my_all_params[${config_vm_id}.real_vm_ids]}" ]
+      then
+        for real_vm_id in ${my_all_params[${config_vm_id}.real_vm_ids]}
+        do
+          if [ -v vm_ids[${config_vm_id}] ]
+          then
+            color_selected="${COLOR_WHITE}"
+          else
+            color_selected="${COLOR_NORMAL}"
+          fi
+
+          printf -- \
+            "   ${color_selected}%-${column_width}s${COLOR_NORMAL} | %-${column_width}s | %s\n" \
+            "${my_config_vm_list[${config_vm_id}]}" \
+            "${my_real_vm_list[${real_vm_id}]} (${my_all_params[${real_vm_id}.vm_esxi_id]})" \
+            "${real_vm_ids[${real_vm_id}]}"
+          unset real_vm_ids[${real_vm_id}]
+          unset config_vm_ids[${config_vm_id}]
+
+          if [ -v vm_ids[${config_vm_id}] ]
+          then
+            if [ "${my_all_params[${real_vm_id}.vmx_parameters]}" = "yes" ]
+            then
+              echo "  ${separator_line}"
+              for vmx_param in "${!my_params_map[@]}"
+              do
+                config_param="${my_params_map[${vmx_param}]}"
+                config_value="${my_all_params[${config_vm_id}.${config_param}]}"
+
+                if [ -v my_all_params[${real_vm_id}.${vmx_param}] ]
+                then
+                  real_value="${my_all_params[${real_vm_id}.${vmx_param}]}"
+                  if [ "${config_value}" = "${real_value}" ]
+                  then
+                    color_difference="${COLOR_NORMAL}"
+                  else
+                    color_difference="${COLOR_YELLOW}"
+                  fi
+                else
+                  color_difference="${COLOR_RED}"
+                  real_value="(NOT FOUND)"
+                fi
+
+                printf -- \
+                  "   ${color_difference}%-${column_width}s > %-${column_width}s < %-${column_width}s${COLOR_NORMAL}\n" \
+                  "${config_value}" \
+                  "${real_value}" \
+                  "${config_param}"
+              done
+            else
+              printf -- \
+                "   ${COLOR_RED}%-${column_width}s | %-${column_width}s > %-${column_width}s${COLOR_NORMAL}\n" \
+                "" \
+                "Cannot get VMX-parameters" \
+                "See details above"
+            fi
+            echo "  ${separator_line}"
+          fi
+        done
+      fi
+    done
+
+    for config_vm_id in "${!config_vm_ids[@]}"
+    do
+      config_vm_name="${my_config_vm_list[${config_vm_id}]}"
+
+      if [ -v vm_ids[${config_vm_id}] ]
+      then
+        color_selected="${COLOR_WHITE}"
+      else
+        color_selected="${COLOR_NORMAL}"
+      fi
+
+      printf -- \
+        "   ${color_selected}%-${column_width}s${COLOR_NORMAL} | %-${column_width}s | %s\n" \
+        "${config_vm_name}" \
+        "" \
+        "${config_vm_ids[${config_vm_id}]}"
+    done
+
+    for real_vm_id in "${!real_vm_ids[@]}"
+    do
+      real_vm_name="${my_real_vm_list[${real_vm_id}]}"
+
+      printf -- \
+        "   %-${column_width}s | %-${column_width}s | %s\n" \
+        "" \
+        "${real_vm_name}" \
+        "${real_vm_ids[${real_vm_id}]}"
+    done
+
+  echo
+  done
+
+  if [    "${my_flags[skip_availability_check]}" = "yes" \
+       -o "${my_flags[unavailable_presence]}" = "yes" ]
+  then
+    attention \
+      "Virtual machine map not complete because some hypervisors is unavailable or unchecked," \
+      "therefore may not be accurate in the column 'Also founded on another hypervisors:'" \
+      "" \
+      "For complete information, please do not use the '-n' or '-i' keys"
+  fi
+
+  printf -- "Total: %d (of %d) hypervisor(s) differences displayed\n" \
+    "${#esxi_ids[@]}" \
+    "${#my_config_esxi_list[@]}"
+  printf -- "\n"
   exit 0
 }
 
 # Trap function for SIGINT
 function trap_sigint {
   remove_temp_dir
-  if [ "${command_name}" != "ls" ]
+  if [    "${command_name}" != "ls" \
+       -a "${command_name}" != "show" ]
   then
     show_processed_vm_status
-    show_remove_failed_cachefiles
   fi
+  show_remove_failed_cachefiles
   warning "Interrupted"
 }
 

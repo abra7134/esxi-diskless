@@ -48,6 +48,11 @@ function _print {
   esac
 }
 
+function attention {
+  _print >&2 attention "${@}"
+}
+
+
 function error {
   _print >&2 error "${@}"
   exit 1
