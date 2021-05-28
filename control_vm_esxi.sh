@@ -8,7 +8,7 @@ MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("CACHE_DIR" "CACHE_VALID" "ESXI_CONFIG_PATH")
 MY_VERSION="2.210512"
 
-CACHE_DIR="${CACHE_DIR:-"${0%/*}/cache"}"
+CACHE_DIR="${CACHE_DIR:-"${0%/*}/.cache"}"
 CACHE_VALID="${CACHE_VALID:-3600}" # 1 hour
 ESXI_CONFIG_PATH="${CONFIG_PATH:-"${0%.sh}.ini"}"
 
