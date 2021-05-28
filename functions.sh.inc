@@ -71,12 +71,6 @@ function internal {
     i="" \
     stack_trace_message=()
 
-  # Don't print anything if runned from subshell
-  if [ ${BASH_SUBSHELL} -gt 0 ]
-  then
-    return 0
-  fi
-
   # Prepare the stack trace message for debugging
   for (( i=1; i<${#FUNCNAME[@]}; i++ ))
   do
@@ -85,14 +79,14 @@ function internal {
 
   if [ -z "${1}" ]
   then
-    _print shit \
+    _print "shit(${BASH_SUBSHELL})" \
       "Happen, let a maintainer know or solve the problem yourself" \
       "" \
       "Stack trace:" \
       "${stack_trace_message[@]}" \
     >&2
   else
-    _print internal \
+    _print "internal(${BASH_SUBSHELL})" \
       "${@}" \
       "" \
       "Stack trace:" \
