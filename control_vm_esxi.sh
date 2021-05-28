@@ -1865,9 +1865,10 @@ function command_ls {
     parse_args_list "${@}"
   fi
   # And parse again with all virtual machines if the previous step return the empty list
-  if [ "${#vm_ids[@]}" -lt 1 ]
+  if [    "${#vm_ids[@]}" -lt 1 \
+       -a "${#esxi_ids[@]}" -lt 1 ]
   then
-    parse_args_list "${my_config_vm_list[@]}"
+    parse_args_list "${my_config_esxi_list[@]}"
   fi
 
   check_dependencies
@@ -1929,16 +1930,17 @@ function command_ls {
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
           "$(print_param vm_guest_type ${vm_id})"
-        printf -- "    memory_mb=\"%s\" vcpus=\"%s\" timezone=\"%s\" datastore=\"%s\"\n" \
+        printf -- "    vm_memory_mb=\"%s\" vm_vcpus=\"%s\" vm_timezone=\"%s\" vm_esxi_datastore=\"%s\"\n" \
           "$(print_param vm_memory_mb ${vm_id})" \
           "$(print_param vm_vcpus ${vm_id})" \
           "$(print_param vm_timezone ${vm_id})" \
           "$(print_param vm_esxi_datastore ${vm_id})"
-        printf -- "    network=\"%s\" gateway=\"%s\" netmask=\"%s\" dns_servers=\"%s\"\n" \
+        printf -- "    vm_network_name=\"%s\" vm_dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
-          "$(print_param vm_ipv4_gateway ${vm_id})" \
-          "$(print_param vm_ipv4_netmask ${vm_id})" \
           "$(print_param vm_dns_servers ${vm_id})"
+        printf -- "    vm_ipv4_gateway=\"%s\" vm_ipv4_netmask=\"%s\"\n" \
+          "$(print_param vm_ipv4_gateway ${vm_id})" \
+          "$(print_param vm_ipv4_netmask ${vm_id})"
         printf -- "    local_iso_path=\"%s\" local_hook_path=\"%s\"\n" \
           "$(print_param local_iso_path ${vm_id})" \
           "$(print_param local_hook_path ${vm_id})"
