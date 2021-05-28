@@ -6,7 +6,7 @@
 MY_DEPENDENCIES=("mktemp" "rm" "scp" "sort" "ssh" "sshpass" "stat" "ping")
 MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("CACHE_DIR" "CACHE_VALID" "ESXI_CONFIG_PATH")
-MY_VERSION="2.210512"
+MY_VERSION="2.210528"
 
 CACHE_DIR="${CACHE_DIR:-"${0%/*}/.cache"}"
 CACHE_VALID="${CACHE_VALID:-3600}" # 1 hour
