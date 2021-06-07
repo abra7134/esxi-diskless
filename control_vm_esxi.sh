@@ -144,6 +144,8 @@ function check_vm_params {
     echo $((${1}*256*256*256+${2}*256*256+${3}*256+${4}))
   }
 
+  progress "Checking virtual machine parameters"
+
   if [ ! -f "${params[local_iso_path]}" ]
   then
     skipping \
@@ -174,10 +176,15 @@ function check_vm_params {
   elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
          -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
   then
-    skipping \
-      "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
-      "Please correct address with netmask or gateway address of virtual machine"
-    return 1
+    if [ "${my_flags[skip_vm_network_params_check]}" = "yes" ]
+    then
+      echo "    Skipped checking of network paramaters because '-sn' flag is specified"
+    else
+      skipping \
+        "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
+        "Please correct address with netmask or gateway address of virtual machine"
+      return 1
+    fi
   fi
 
   return 0
@@ -1076,6 +1083,7 @@ function parse_args_list {
       [-f]="force"
       [-i]="ignore_unavailable"
       [-n]="skip_availability_check"
+      [-sn]="skip_vm_network_params_check"
     )
 
   esxi_ids=()
@@ -1476,10 +1484,11 @@ function command_create {
       "" \
       "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
       "" \
-      "Options: -d  Destroy the same virtual machine on another hypervisor (migration analogue)" \
-      "         -f  Recreate a virtual machine on destination hypervisor if it already exists" \
-      "         -i  Do not stop the script if any of hypervisors are not available" \
-      "         -n  Skip virtual machine availability check on all hypervisors" \
+      "Options: -d   Destroy the same virtual machine on another hypervisor (migration analogue)" \
+      "         -f   Recreate a virtual machine on destination hypervisor if it already exists" \
+      "         -i   Do not stop the script if any of hypervisors are not available" \
+      "         -n   Skip virtual machine availability check on all hypervisors" \
+      "         -sn  Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)" \
       "" \
       "Available names can be viewed using the '${my_name} ls' command"
   elif [ "${1}" = "description" ]
