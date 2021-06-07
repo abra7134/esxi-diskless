@@ -1061,13 +1061,13 @@ function parse_ini_file {
 # and preparing 3 arrays with identifiers of encountered hypervisors and virtual machines,
 # and 1 array with flags for script operation controls
 #
-#  Input: ${@}                  - List of flags, virtual machines names or hypervisors names
-# Modify: ${my_flags[@]}        - Keys - flags names, values - "yes" string
-#         ${esxi_ids[@]}        - Keys - identifiers of hypervisors, values - empty string
-#         ${esxi_ids_sorted[@]} - Values - identifiers of hypervisors in order of their indication
-#         ${vm_ids[@]}          - Keys - identifiers of virtual machines, values - empty string
-#         ${vm_ids_sorted[@]}   - Values - identifiers of virtual machines in order of their indication
-# Return: 0                     - Always
+#  Input: ${@}                   - List of flags, virtual machines names or hypervisors names
+# Modify: ${my_flags[@]}         - Keys - flags names, values - "yes" string
+#         ${esxi_ids[@]}         - Keys - identifiers of hypervisors, values - empty string
+#         ${esxi_ids_ordered[@]} - Values - identifiers of hypervisors in order of their indication
+#         ${vm_ids[@]}           - Keys - identifiers of virtual machines, values - empty string
+#         ${vm_ids_ordered[@]}   - Values - identifiers of virtual machines in order of their indication
+# Return: 0                      - Always
 #
 function parse_args_list {
   local \
@@ -1087,9 +1087,9 @@ function parse_args_list {
     )
 
   esxi_ids=()
-  esxi_ids_sorted=()
+  esxi_ids_ordered=()
   vm_ids=()
-  vm_ids_sorted=()
+  vm_ids_ordered=()
 
   for arg_name in "${@}"
   do
@@ -1107,7 +1107,7 @@ function parse_args_list {
         if [ ! -v vm_ids[${vm_id}] ]
         then
           vm_ids[${vm_id}]=""
-          vm_ids_sorted+=(
+          vm_ids_ordered+=(
             "${vm_id}"
           )
 
@@ -1115,7 +1115,7 @@ function parse_args_list {
           if [ ! -v esxi_ids[${esxi_id}] ]
           then
             esxi_ids[${esxi_id}]=""
-            esxi_ids_sorted+=(
+            esxi_ids_ordered+=(
               "${esxi_id}"
             )
           fi
@@ -1132,7 +1132,7 @@ function parse_args_list {
         if [ ! -v esxi_ids[${esxi_id}] ]
         then
           esxi_ids[${esxi_id}]=""
-          esxi_ids_sorted+=(
+          esxi_ids_ordered+=(
             "${esxi_id}"
           )
         fi
@@ -1143,7 +1143,7 @@ function parse_args_list {
                -a ! -v vm_ids[${vm_id}] ]
           then
             vm_ids[${vm_id}]=""
-            vm_ids_sorted+=(
+            vm_ids_ordered+=(
               "${vm_id}"
             )
           fi
@@ -1377,11 +1377,11 @@ function run_remote_command {
 
 # Function to print the processed virtual machines status
 #
-#  Input: ${vm_id}            - The identifier the current processed virtual machine
-#                               for cases where the process is interrupted
-#         ${vm_ids[@]}        - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
-#         ${vm_ids_sorted[@]} - Values - identifiers of virtual machines in order of their indication
-# Return: 0                   - Always
+#  Input: ${vm_id}             - The identifier the current processed virtual machine
+#                                for cases where the process is interrupted
+#         ${vm_ids[@]}         - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
+#         ${vm_ids_ordered[@]} - Values - identifiers of virtual machines in order of their indication
+# Return: 0                    - Always
 #
 function show_processed_vm_status {
   local \
@@ -1397,7 +1397,7 @@ function show_processed_vm_status {
   then
     echo >&2 -e "${COLOR_NORMAL}"
     echo >&2 "Processed virtual machines status:"
-    for vm_id in "${vm_ids_sorted[@]}"
+    for vm_id in "${vm_ids_ordered[@]}"
     do
       esxi_id="${my_all_params[${vm_id}.at]}"
       esxi_name="${my_config_esxi_list[${esxi_id}]}"
@@ -1503,8 +1503,8 @@ function command_create {
     esxi_ids=() \
     vm_ids=()
   local \
-    esxi_ids_sorted=() \
-    vm_ids_sorted=()
+    esxi_ids_ordered=() \
+    vm_ids_ordered=()
 
   parse_args_list "${@}"
   check_dependencies
@@ -1568,7 +1568,7 @@ function command_create {
 
   vm_id_filepath="${temp_dir}/vm_id"
 
-  for vm_id in "${vm_ids_sorted[@]}"
+  for vm_id in "${vm_ids_ordered[@]}"
   do
     vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_all_params[${vm_id}.at]}"
@@ -1970,8 +1970,8 @@ function command_ls {
     esxi_ids=() \
     vm_ids=()
   local \
-    esxi_ids_sorted=() \
-    vm_ids_sorted=()
+    esxi_ids_ordered=() \
+    vm_ids_ordered=()
 
   # Parse args list if it not empty
   if [ "${#}" -gt 0 ]
@@ -2096,8 +2096,8 @@ function command_show {
     esxi_ids=() \
     vm_ids=()
   local \
-    esxi_ids_sorted=() \
-    vm_ids_sorted=()
+    esxi_ids_ordered=() \
+    vm_ids_ordered=()
 
   parse_args_list "${@}"
   check_dependencies
@@ -2154,7 +2154,7 @@ function command_show {
     {1..$((column_width+2))}
   separator_line="${separator_line}+${separator_line}+${separator_line}"
 
-  for esxi_id in "${esxi_ids_sorted[@]}"
+  for esxi_id in "${esxi_ids_ordered[@]}"
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 

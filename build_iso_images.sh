@@ -288,11 +288,11 @@ function skipping {
 # and preparing 2 arrays with identifiers of encountered builds,
 # and array with flags for script operation controls
 #
-#  Input: ${@}                    - List of virtual machines names
-# Modify: ${my_flags[@]}          - Keys - flags names, values - "yes" string
-#         ${builds_ids[@]}        - Keys - identifiers of builds, values - empty string
-#         ${builds_ids_sorted[@]} - Values - identifiers of builds in order of their indication
-# Return: 0                       - Always
+#  Input: ${@}                     - List of virtual machines names
+# Modify: ${my_flags[@]}           - Keys - flags names, values - "yes" string
+#         ${builds_ids[@]}         - Keys - identifiers of builds, values - empty string
+#         ${builds_ids_ordered[@]} - Values - identifiers of builds in order of their indication
+# Return: 0                        - Always
 #
 function parse_args_list {
   local \
@@ -305,7 +305,7 @@ function parse_args_list {
     )
 
   builds_ids=()
-  builds_ids_sorted=()
+  builds_ids_ordered=()
 
   for arg_name in "${@}"
   do
@@ -323,7 +323,7 @@ function parse_args_list {
         if [ ! -v builds_ids[${build_id}] ]
         then
           builds_ids[${build_id}]=""
-          builds_ids_sorted+=(
+          builds_ids_ordered+=(
             "${build_id}"
           )
         fi
@@ -642,7 +642,7 @@ function command_build {
   local -A \
     builds_ids=()
   local \
-    builds_ids_sorted=()
+    builds_ids_ordered=()
 
   parse_args_list "${@}"
 
@@ -675,7 +675,7 @@ function command_build {
     repo_dir="" \
     repo_head_short_hash="" \
 
-  for build_id in "${builds_ids_sorted[@]}"
+  for build_id in "${builds_ids_ordered[@]}"
   do
     build_name="${my_builds_list[${build_id}]}"
 
@@ -954,7 +954,7 @@ function command_ls {
   local -A \
     builds_ids=()
   local \
-    builds_ids_sorted=()
+    builds_ids_ordered=()
 
   # Parse args list if it not empty
   if [ "${#}" -gt 0 ]
