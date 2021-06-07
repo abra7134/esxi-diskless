@@ -182,7 +182,7 @@ function check_vm_params {
     else
       skipping \
         "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
-        "Please correct address with netmask or gateway address of virtual machine"
+        "Please correct address with netmask or gateway address of virtual machine or use '-sn' flag to ignore this check"
       return 1
     fi
   fi
@@ -2134,6 +2134,7 @@ function command_show {
     config_param="" \
     config_value="" \
     config_vm_id="" \
+    displayed_alived="" \
     esxi_id="" \
     esxi_name="" \
     real_value="" \
@@ -2180,6 +2181,7 @@ function command_show {
 
     real_vm_ids=()
     config_vm_ids=()
+    displayed_alived="yes"
 
     for vm_id in \
       "${!my_config_vm_list[@]}" \
@@ -2327,20 +2329,24 @@ function command_show {
   echo
   done
 
-  if [    "${my_flags[skip_availability_check]}" = "yes" \
-       -o "${my_flags[unavailable_presence]}" = "yes" ]
-  then
-    attention \
-      "Virtual machine map not complete because some hypervisors is unavailable or unchecked," \
-      "therefore may not be accurate in the column 'Also founded on another hypervisors:'" \
-      "" \
-      "For complete information, please do not use the '-n' or '-i' keys"
-  fi
-
   printf -- "Total: %d (of %d) hypervisor(s) differences displayed\n" \
     "${#esxi_ids[@]}" \
     "${#my_config_esxi_list[@]}"
   printf -- "\n"
+
+  if [ "${displayed_alived}" = "yes" ]
+  then
+    if [    "${my_flags[skip_availability_check]}" = "yes" \
+         -o "${my_flags[unavailable_presence]}" = "yes" ]
+    then
+      attention \
+        "Virtual machine map not complete because some hypervisors is unavailable or unchecked," \
+        "therefore may not be accurate in the column 'Also founded on another hypervisors:'" \
+        "" \
+        "For complete information, please do not use the '-n' or '-i' keys"
+    fi
+  fi
+
   exit 0
 }
 
