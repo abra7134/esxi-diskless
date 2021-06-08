@@ -15,15 +15,20 @@ function _print {
 
   case "${print_type}" in
     "info" )
-      local info_message
+      local \
+        info_message=""
+
       echo
       for info_message in "${@}"; do
-        printf -- "${COLOR_YELLOW}!!! ${info_message}${COLOR_NORMAL}\n"
+        printf -- \
+          "${COLOR_YELLOW}!!! ${info_message}${COLOR_NORMAL}\n"
       done
       echo
       ;;
     "progress" )
-      local progress_message
+      local \
+        progress_message=""
+
       for progress_message in "${@}"; do
         printf -- \
           "${COLOR_NORMAL}--> (%dm%ds) %i. ${progress_message} ...${COLOR_GRAY}\n" \
@@ -34,9 +39,12 @@ function _print {
       done
       ;;
     * )
-      local ident="!!! ${print_type^^}:"
-      local ident_length="${#ident}"
-      local error_message="${1}"
+      local \
+        error_message="${1}" \
+        ident="!!! ${print_type^^}:"
+      local \
+        ident_length="${#ident}"
+
       echo
       printf -- \
         "${COLOR_RED}%s${COLOR_NORMAL} ${error_message}\n" \
@@ -89,14 +97,16 @@ function internal {
 
   if [ -z "${1}" ]
   then
-    _print "shit(${BASH_SUBSHELL})" \
+    _print \
+      "shit(${BASH_SUBSHELL})" \
       "Happen, let a maintainer know or solve the problem yourself" \
       "" \
       "Stack trace:" \
       "${stack_trace_message[@]}" \
     >&2
   else
-    _print "internal(${BASH_SUBSHELL})" \
+    _print \
+      "internal(${BASH_SUBSHELL})" \
       "${@}" \
       "" \
       "Stack trace:" \
@@ -109,7 +119,7 @@ function internal {
     if ! declare -F "${post_command}" >/dev/null
     then
       post_command="" \
-      internal "The value of 'post_command' is not a function, please inform a maintainer"
+        internal "The value of 'post_command' is not a function, please inform a maintainer"
     fi
 
     "${post_command}"
@@ -197,7 +207,10 @@ function command_help {
   do
     if [[ "${function_name}" =~ ^command_ ]]
     then
-      printf "  ${COLOR_WHITE}%-10s${COLOR_NORMAL} %s\n" "${function_name#command_}" "$(${function_name} description)"
+      printf -- \
+        "  ${COLOR_WHITE}%-10s${COLOR_NORMAL} %s\n" \
+        "${function_name#command_}" \
+        "$(${function_name} description)"
     fi
   done
   echo
@@ -212,7 +225,7 @@ function command_help {
 function finded_duplicate {
   local \
     find_item="${1}" \
-    i
+    i=""
 
   shift
   for i in "${@}"
@@ -309,17 +322,20 @@ function run_command {
 
   init_colors
 
-  echo -en "${COLOR_NORMAL}${UNDERLINE}"
-  echo -n "${MY_NAME} v${MY_VERSION}"
-  echo -e "${COLOR_NORMAL}"
-  echo
+  printf -- \
+    "${COLOR_NORMAL}${UNDERLINE}%s v%s${COLOR_NORMAL}\n\n" \
+    "${MY_NAME}" \
+    "${MY_VERSION}"
 
   echo "Environment variables:"
   for v in \
     "${MY_VARIABLES[@]}"
   do
     eval my_variable=\"\${${v}}\"
-    echo -e "  ${v}=\"${COLOR_WHITE}${my_variable}${COLOR_NORMAL}\""
+    printf -- \
+      "  %s=\"${COLOR_WHITE}%s${COLOR_NORMAL}\"\n" \
+      "${v}" \
+      "${my_variable}"
   done
   echo
 
