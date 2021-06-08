@@ -25,11 +25,11 @@ function _print {
     "progress" )
       local progress_message
       for progress_message in "${@}"; do
-        printf -- "${COLOR_NORMAL}--> (%dm%ds) %i. %s ...${COLOR_GRAY}\n" \
+        printf -- \
+          "${COLOR_NORMAL}--> (%dm%ds) %i. ${progress_message} ...${COLOR_GRAY}\n" \
           $((SECONDS/60)) \
           $((SECONDS%60)) \
-          $((_progress_number)) \
-          "${progress_message}"
+          $((_progress_number))
         let _progress_number+=1
       done
       ;;
@@ -38,10 +38,15 @@ function _print {
       local ident_length="${#ident}"
       local error_message="${1}"
       echo
-      printf -- "${COLOR_RED}%s${COLOR_NORMAL} %s\n" "${ident}" "${error_message}"
+      printf -- \
+        "${COLOR_RED}%s${COLOR_NORMAL} ${error_message}\n" \
+        "${ident}"
+
       shift
       for error_message in "${@}"; do
-        printf -- "%-${ident_length}s %s\n" "" "${error_message}"
+        printf -- \
+          "%-${ident_length}s ${error_message}\n" \
+          ""
       done
       echo
       ;;
