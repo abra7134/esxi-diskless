@@ -1429,19 +1429,13 @@ function show_processed_vm_status {
 # Return: 0                               - Always
 #
 function show_remove_failed_cachefiles {
-  local \
-    cachefile_path=""
-
   if [ "${#remove_failed_cachefiles[@]}" -gt 0 ]
   then
-    echo >&2 ""
-    echo >&2 -e "${COLOR_RED}!!! The next cache files failed to remove (see above for details):${COLOR_NORMAL}"
-    echo >&2 -e "(This files need to be removed ${COLOR_RED}manually${COLOR_NORMAL} for correct script working in future)"
-
-    for cachefile_path in "${remove_failed_cachefiles[@]}"
-    do
-      echo >&2 "  - ${cachefile_path}"
-    done
+    attention \
+      "The next cache files failed to remove (see above for details):" \
+      "(This files need to be removed ${UNDERLINE}manually${COLOR_NORMAL} for correct script working in future)" \
+      "" \
+      "${remove_failed_cachefiles[@]/#/* }"
   fi
 
   return 0
