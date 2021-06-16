@@ -95,6 +95,7 @@ patch \
   "${build_dir}"/etc/ssh/sshd_config \
   etc/ssh/sshd_config.patch
 for f in \
+  etc/hostname \
   etc/sysctl.d/kernel.panic.conf \
   etc/sysfs.d/10-set_noop_scheduler.conf \
   etc/systemd/system/cloud-network.service \

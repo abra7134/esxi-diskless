@@ -4,6 +4,8 @@ After=local-fs.target
 
 [Service]
 ExecStart=/bin/umount --lazy /cdrom
+ExecStart=/usr/bin/eject --manualeject off /dev/cdrom
+ExecStart=/usr/bin/eject /dev/cdrom
 Type=oneshot
 
 [Install]
