@@ -3,7 +3,7 @@
 # Script for building ISO-images
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_DEPENDENCIES=("cat" "find" "git" "mkisofs" "sha1sum")
+MY_DEPENDENCIES=("cat" "cp" "find" "git" "mkisofs" "sha1sum")
 MY_NAME="Script for building ISO-images from templates"
 MY_VARIABLES=("BUILD_CONFIG_PATH" "BUILD_OUTPUT_DIR")
 MY_VERSION="2.210505"
@@ -666,6 +666,7 @@ function command_build {
     base_layer_tar_path="" \
     build_id="" \
     build_name="" \
+    build_version_filename=".build_version" \
     builded_images=0 \
     chroot_dir="" \
     f="" \
@@ -845,6 +846,39 @@ function command_build {
       fi
     fi
 
+    progress "Write a '.build_version' special file in chroot and build trees (cat/cp)"
+    if ! \
+      cat \
+      >"${image_dir}/${build_version_filename}" \
+      <<EOF
+base_layer_tar_path="${base_layer_tar_path}"
+base_layer_pre_image_script_path="${base_layer_pre_image_script_path}"
+base_layer_pre_image_hash="${base_layer_pre_image_script_hash}"
+image_version_source="${image_version_source}"
+image_version="${image_version}"
+image_path="${image_path}"
+repo_url="${params[repo_url]}"
+repo_checkout="${params[repo_checkout]}"
+repo_clone_into="${params[repo_clone_into]}"
+repo_head_short_hash="${repo_head_short_hash}"
+run_from_repo="${params[run_from_repo]}"
+EOF
+    then
+      skipping \
+        "Failed to write a '.build_version' special file in build tree"
+      continue
+    fi
+
+    if ! \
+      cp \
+        "${image_dir}/${build_version_filename}" \
+        "${chroot_dir}/${build_version_filename}"
+    then
+      skipping \
+        "Failed to copying a '.build_version' special file from build to chroot tree"
+      continue
+    fi
+
     if [ -f "${base_layer_pre_image_script_path}" ]
     then
       progress "Run the '.pre_image.sh' script from '${params[base_layer]}' base layer"
@@ -876,29 +910,6 @@ function command_build {
     then
       skipping \
         "Failed to copy isolinux loader in build tree"
-      continue
-    fi
-
-    progress "Write a '.build_version' special file in build tree (cat)"
-    if ! \
-      cat \
-      >"${image_dir}"/.build_version \
-      <<EOF
-base_layer_tar_path="${base_layer_tar_path}"
-base_layer_pre_image_script_path="${base_layer_pre_image_script_path}"
-base_layer_pre_image_hash="${base_layer_pre_image_script_hash}"
-image_version_source="${image_version_source}"
-image_version="${image_version}"
-image_path="${image_path}"
-repo_url="${params[repo_url]}"
-repo_checkout="${params[repo_checkout]}"
-repo_clone_into="${params[repo_clone_into]}"
-repo_head_short_hash="${repo_head_short_hash}"
-run_from_repo="${params[run_from_repo]}"
-EOF
-    then
-      skipping \
-        "Failed to write a '.build_version' special file in build tree"
       continue
     fi
 
