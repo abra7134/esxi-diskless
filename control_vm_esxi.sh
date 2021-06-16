@@ -374,6 +374,7 @@ function esxi_vm_simple_command {
 # The function for retrieve the cachefile path for specified esxi_id or real_vm_id
 #
 #  Input: ${1}                      - The esxi_id or real_vm_id for which function the retrieve the actual cachefile path
+#         ${2}                      - Type of cache ('filesystem' or 'vms') if esxi_id specified in ${1}
 #         ${CACHE_DIR}              - The directory for storing cache files
 #         ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
 #                                     {esxi_or_vm_identifier}.{parameter_name}
@@ -388,6 +389,7 @@ function esxi_vm_simple_command {
 function get_cachefile_path_for {
   local \
     cachefile_for="${1}" \
+    cachefile_type="${2}" \
     esxi_id=""
 
   if [ -v my_config_esxi_list[${cachefile_for}] ]
@@ -411,7 +413,7 @@ function get_cachefile_path_for {
 
   if [ "${cachefile_for}" = "esxi" ]
   then
-    echo "${cachefile_basepath}/vms.map"
+    echo "${cachefile_basepath}/${cachefile_type:-vms}.map"
   else
     local \
       vm_name="${my_real_vm_list[${cachefile_for}]}" \
@@ -510,16 +512,24 @@ function get_real_vm_list {
   }
 
   local -A \
+    filesystems_uuids=() \
+    filesystems_names=() \
     params=()
   local \
     esxi_id="" \
     esxi_name="" \
-    map_str="" \
-    map_filepath="" \
+    esxi_ssh_destination=() \
+    filesystem_id=0 \
+    filesystem_name="" \
+    filesystem_uuid="" \
+    filesystems_map_filepath="" \
+    filesystems_map_str="" \
     real_vm_id="" \
     vm_esxi_id="" \
     vm_name="" \
     vm_vmx_filepath="" \
+    vms_map_str="" \
+    vms_map_filepath="" \
     vmx_failed="" \
     vmx_filepath="" \
     vmx_str="" \
@@ -529,28 +539,74 @@ function get_real_vm_list {
   for esxi_id in "${@}"
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
-    progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd)"
+    progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd/esxcli)"
 
     get_params "${esxi_id}"
-    map_filepath=$(
-      get_cachefile_path_for "${esxi_id}"
+    esxi_ssh_destination=(
+      "${params[esxi_ssh_username]}"
+      "${params[esxi_ssh_password]}"
+      "${params[esxi_hostname]}"
+      "${params[esxi_ssh_port]}"
     )
 
+    filesystems_map_filepath=$(
+      get_cachefile_path_for \
+        "${esxi_id}" \
+        filesystems
+    )
     update_cachefile \
-      "${map_filepath}" \
+      "${filesystems_map_filepath}" \
       "ssh" \
-      "${params[esxi_ssh_username]}" \
-      "${params[esxi_ssh_password]}" \
-      "${params[esxi_hostname]}" \
-      "${params[esxi_ssh_port]}" \
+      "${esxi_ssh_destination[@]}" \
+      "esxcli storage filesystem list" \
+      "|| Cannot get list of storage filesystems on hypervisor (esxcli)" \
+    || true
+
+    filesystem_id=0
+    filesystem_uuids=()
+    if [    -f "${filesystems_map_filepath}" \
+         -a -s "${filesystems_map_filepath}" ]
+    then
+      while \
+        read -r \
+          -u 5 \
+          filesystems_map_str
+      do
+        if [[ "${filesystems_map_str}" =~ ^("Mount "|"-------") ]]
+        then
+          continue
+        elif [[ ! "${filesystems_map_str}" =~ ^"/vmfs/volumes/"([[:alnum:]_\/\.\-]+)[[:blank:]]+([[:alnum:]_\.\-]*)[[:blank:]]+[[:alnum:]]{8}-[[:alnum:]]{8}-[[:alnum:]]{4}-[[:alnum:]]{12}[[:blank:]]+ ]]
+        then
+          error \
+            "Cannot parse the '${filesystems_map_str}' string obtained from hypervisor" \
+            "Let a maintainer know or solve the problem yourself"
+        fi
+
+        filesystem_uuid="${BASH_REMATCH[1]}"
+        filesystem_name="${BASH_REMATCH[2]}"
+        let filesystem_id+=1
+        filesystems_names[${filesystem_id}]="${filesystem_name}"
+        filesystems_uuids[${filesystem_id}]="${filesystem_uuid}"
+      done \
+      5<"${filesystems_map_filepath}"
+    fi
+
+    vms_map_filepath=$(
+      get_cachefile_path_for \
+        "${esxi_id}"
+    )
+    update_cachefile \
+      "${vms_map_filepath}" \
+      "ssh" \
+      "${esxi_ssh_destination[@]}" \
       "type -f awk cat mkdir vim-cmd >/dev/null" \
       "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
       "vim-cmd vmsvc/getallvms" \
       "|| Cannot get list of virtual machines on hypervisor (vim-cmd)" \
     || true
 
-    if [    -f "${map_filepath}" \
-         -a -s "${map_filepath}" ]
+    if [    -f "${vms_map_filepath}" \
+         -a -s "${vms_map_filepath}" ]
     then
       my_all_params[${esxi_id}.alive]="yes"
       vmx_failed=""
@@ -558,15 +614,15 @@ function get_real_vm_list {
       while \
         read -r \
           -u 5 \
-          map_str
+          vms_map_str
       do
-        if [[ "${map_str}" =~ ^"Vmid " ]]
+        if [[ "${vms_map_str}" =~ ^"Vmid " ]]
         then
           continue
-        elif [[ ! "${map_str}" =~ ^([[:digit:]]+)[[:blank:]]+([[:alnum:]_\.\-]+)[[:blank:]]+\[([[:alnum:]_\.\-]+)\][[:blank:]]+([[:alnum:]_\/\.\-]+\.vmx)[[:blank:]]+(.*)$ ]]
+        elif [[ ! "${vms_map_str}" =~ ^([[:digit:]]+)[[:blank:]]+([[:alnum:]_\.\-]+)[[:blank:]]+\[([[:alnum:]_\.\-]+)\][[:blank:]]+([[:alnum:]_\/\.\-]+\.vmx)[[:blank:]]+(.*)$ ]]
         then
           error \
-            "Cannot parse the '${map_str}' string obtained from hypervisor" \
+            "Cannot parse the '${vms_map_str}' string obtained from hypervisor" \
             "Let a maintainer know or solve the problem yourself"
         fi
 
@@ -584,17 +640,15 @@ function get_real_vm_list {
         then
           vm_vmx_filepath="/vmfs/volumes/${BASH_REMATCH[3]}/${BASH_REMATCH[4]}"
           vmx_filepath=$(
-            get_cachefile_path_for "${real_vm_id}"
+            get_cachefile_path_for \
+              "${real_vm_id}"
           )
 
           if ! \
             update_cachefile \
               "${vmx_filepath}" \
               "ssh" \
-              "${params[esxi_ssh_username]}" \
-              "${params[esxi_ssh_password]}" \
-              "${params[esxi_hostname]}" \
-              "${params[esxi_ssh_port]}" \
+              "${esxi_ssh_destination[@]}" \
               "cat \"${vm_vmx_filepath}\"" \
               "|| Cannot get the VMX file content (cat)"
           then
@@ -624,7 +678,17 @@ function get_real_vm_list {
                   vmx_param_value="${BASH_REMATCH[2]}"
                   if [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)$ ]]
                   then
-                    my_all_params[${real_vm_id}.special.vm_esxi_datastore]="${BASH_REMATCH[1]}"
+                    filesystem_name="${BASH_REMATCH[1]}"
+                    for filesystem_id in "${!filesystems_uuids[@]}"
+                    do
+                      if [ "${filesystem_name}" = "${filesystems_uuids[${filesystem_id}]}" ]
+                      then
+                        filesystem_name="${filesystems_names[${filesystem_id}]}"
+                        my_all_params[${real_vm_id}.special.vm_esxi_datastore_mapped]="yes"
+                        break
+                      fi
+                    done
+                    my_all_params[${real_vm_id}.special.vm_esxi_datastore]="${filesystem_name}"
                     my_all_params[${real_vm_id}.special.local_iso_path]="${BASH_REMATCH[3]}"
                   else
                     error \
@@ -642,7 +706,7 @@ function get_real_vm_list {
           fi
         fi
       done \
-      5<"${map_filepath}"
+      5<"${vms_map_filepath}"
     else
       if [ "${my_flags[skip_availability_check]}" = "yes" ]
       then
@@ -1186,7 +1250,8 @@ function remove_cachefile_for {
     cachefile_path=""
 
   cachefile_path=$(
-    get_cachefile_path_for "${cachefile_for}"
+    get_cachefile_path_for \
+      "${cachefile_for}"
   )
 
   if [ -f "${cachefile_path}" ]
@@ -2132,6 +2197,7 @@ function command_show {
     config_param="" \
     config_value="" \
     config_vm_id="" \
+    datastore_attention="" \
     displayed_alived="" \
     esxi_id="" \
     esxi_name="" \
@@ -2261,6 +2327,7 @@ function command_show {
               do
                 config_param="${my_params_map[${vmx_param}]}"
                 config_value="${my_all_params[${config_vm_id}.${config_param}]}"
+                datastore_attention=""
 
                 if [ -v my_all_params[${real_vm_id}.${vmx_param}] ]
                 then
@@ -2270,6 +2337,11 @@ function command_show {
                     color_difference="${COLOR_NORMAL}"
                   else
                     color_difference="${COLOR_YELLOW}"
+                    if [    "${config_param}" = "vm_esxi_datastore" \
+                         -a "${my_all_params[${real_vm_id}.${vmx_param}_mapped]}" != "yes" ]
+                    then
+                      datastore_attention="!!! cannot get volume name, so mismatch may not be accurate"
+                    fi
                   fi
                 else
                   color_difference="${COLOR_RED}"
@@ -2281,6 +2353,15 @@ function command_show {
                   "${config_value}" \
                   "${real_value}" \
                   "${config_param}"
+
+                if [ -n "${datastore_attention}" ]
+                then
+                  printf -- \
+                    "   ${color_difference}%-${column_width}s > %-${column_width}s${COLOR_NORMAL}\n" \
+                    "" \
+                    "${datastore_attention}"
+                fi
+
               done
             else
               printf -- \
