@@ -302,6 +302,13 @@ function print_param() {
   return 0
 }
 
+function create_temp_dir {
+  progress "Create a temporary directory"
+  temp_dir=$(mktemp -d) \
+  || internal "Can't create a temporary directory"
+  echo "    The '${temp_dir}' directory is created"
+}
+
 function remove_temp_dir {
   if [ -d "${temp_dir}" ]
   then

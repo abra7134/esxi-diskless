@@ -3,7 +3,7 @@
 # Script for building ISO-images
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_DEPENDENCIES=("find" "git" "mkisofs" "sha1sum")
+MY_DEPENDENCIES=("cat" "find" "git" "mkisofs" "sha1sum")
 MY_NAME="Script for building ISO-images from templates"
 MY_VARIABLES=("BUILD_CONFIG_PATH" "BUILD_OUTPUT_DIR")
 MY_VERSION="2.210505"
@@ -653,6 +653,8 @@ function command_build {
       "Please specify a template name or names to be builded"
   fi
 
+  create_temp_dir
+
   local -A \
     params=()
   local \
@@ -1016,7 +1018,5 @@ function trap_sigint {
 
 trap "post_command=remove_temp_dir internal;" ERR
 trap "trap_sigint;" SIGINT
-
-temp_dir=$(mktemp -d)
 
 run_command "${@}"

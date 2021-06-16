@@ -1502,6 +1502,7 @@ function command_create {
 
   parse_args_list "${@}"
   check_dependencies
+  create_temp_dir
   check_cache_params
 
   if [    "${my_flags[destroy_on_another]}" = "yes" \
@@ -2095,6 +2096,7 @@ function command_show {
 
   parse_args_list "${@}"
   check_dependencies
+  create_temp_dir
   check_cache_params
 
   if [ "${my_flags[skip_availability_check]}" = "yes" ]
@@ -2111,6 +2113,8 @@ function command_show {
   fi
 
   progress "Completed"
+
+  remove_temp_dir
 
   echo -e "${COLOR_NORMAL}"
   echo "Showing differences:"
@@ -2358,7 +2362,5 @@ function trap_sigint {
 
 trap "post_command=remove_temp_dir internal;" ERR
 trap "trap_sigint;" SIGINT
-
-temp_dir=$(mktemp -d)
 
 run_command "${@}"
