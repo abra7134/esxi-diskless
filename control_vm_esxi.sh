@@ -3,7 +3,7 @@
 # Script for simply control (create/destroy/restart) of virtual machines on ESXi
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_DEPENDENCIES=("mktemp" "rm" "scp" "sort" "ssh" "sshpass" "stat" "ping")
+MY_DEPENDENCIES=("govc" "mktemp" "rm" "scp" "sort" "ssh" "sshpass" "stat" "ping")
 MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("CACHE_DIR" "CACHE_VALID" "ESXI_CONFIG_PATH")
 MY_VERSION="2.210607"
@@ -133,59 +133,74 @@ function check_cache_params {
 
 # The function for checking virtual machine parameters values
 #
-#  Input: ${params[@]}          - The array with parameters
-# Return: 0                     - If all checks are completed
-#         1                     - Otherwise
+#  Input: ${1}          - The checked parameter name or 'all'
+#         ${params[@]}  - The array with parameters
+# Return: 0             - If all checks are completed
+#         1             - Otherwise
 #
 function check_vm_params {
+  local \
+    check_vm_param="${1}"
+
   # Function to convert ipv4 address from string to integer value
   function ip4_addr_to_int {
     set -- ${1//./ }
     echo $((${1}*256*256*256+${2}*256*256+${3}*256+${4}))
   }
 
-  progress "Checking virtual machine parameters"
+  progress "Checking '${check_vm_param}' virtual machine parameter(s)"
 
-  if [ ! -f "${params[local_iso_path]}" ]
-  then
-    skipping \
-      "The specified ISO-file path '${params[local_iso_path]}' is not exists" \
-      "Please check it, correct and try again"
-    return 1
-  elif [ -n "${params[local_hook_path]}" ]
-  then
-    if [ ! -f "${params[local_hook_path]}" ]
-    then
-      skipping \
-        "The specified hook-file path '${params[local_hook_path]}' is not exists" \
-        "Please check it, correct and try again"
-      return 1
-    elif [ ! -x "${params[local_hook_path]}" ]
-    then
-      skipping \
-        "The specified hook-file path '${params[local_hook_path]}' is not executable" \
-        "Please set right permissions (+x) and try again"
-      return 1
-    fi
-  elif [ "${params[vm_ipv4_address]}" = "${params[vm_ipv4_gateway]}" ]
-  then
-    skipping \
-      "The specified gateway '${params[vm_ipv4_gateway]}' cannot be equal to an address" \
-      "Please correct address or gateway address of virtual machine"
-    return 1
-  elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
-         -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
-  then
-    if [ "${my_flags[skip_vm_network_params_check]}" = "yes" ]
-    then
-      echo "    Skipped checking of network paramaters because '-sn' flag is specified"
-    else
-      skipping \
-        "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
-        "Please correct address with netmask or gateway address of virtual machine or use '-sn' flag to ignore this check"
-      return 1
-    fi
-  fi
+  case "${check_vm_param}"
+  in
+    all | local_iso_path )
+      if [ ! -f "${params[local_iso_path]}" ]
+      then
+        skipping \
+          "The specified ISO-file path '${params[local_iso_path]}' is not exists" \
+          "Please check it, correct and try again"
+        return 1
+      fi
+      ;;&
+    all | local_hook_path )
+      if [ -n "${params[local_hook_path]}" ]
+      then
+        if [ ! -f "${params[local_hook_path]}" ]
+        then
+          skipping \
+            "The specified hook-file path '${params[local_hook_path]}' is not exists" \
+            "Please check it, correct and try again"
+          return 1
+        elif [ ! -x "${params[local_hook_path]}" ]
+        then
+          skipping \
+            "The specified hook-file path '${params[local_hook_path]}' is not executable" \
+            "Please set right permissions (+x) and try again"
+          return 1
+        fi
+      fi
+      ;;&
+    all | vm_ipv4_address | vm_ipv4_netmask | vm_ipv4_gateway )
+      if [ "${params[vm_ipv4_address]}" = "${params[vm_ipv4_gateway]}" ]
+      then
+        skipping \
+          "The specified gateway '${params[vm_ipv4_gateway]}' cannot be equal to an address" \
+          "Please correct address or gateway address of virtual machine"
+        return 1
+      elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
+             -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
+      then
+        if [ "${my_flags[skip_vm_network_params_check]}" = "yes" ]
+        then
+          echo "    Skipped checking of network paramaters because '-sn' flag is specified"
+        else
+          skipping \
+            "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
+            "Please correct address with netmask or gateway address of virtual machine or use '-sn' flag to ignore this check"
+          return 1
+        fi
+      fi
+      ;;&
+  esac
 
   return 0
 }
@@ -1638,9 +1653,6 @@ function command_create {
 
     info "Will ${my_flags[force]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
 
-    check_vm_params \
-    || continue
-
     # Checking the hypervisor liveness
     if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
     then
@@ -1660,9 +1672,11 @@ function command_create {
         then
           if [ -n "${vm_esxi_id}" ]
           then
-            internal \
-              "The \${vm_esxi_id}='${vm_esxi_id}' is not impossible, because it already defined with value '${vm_esxi_id}'" \
-              "Something is wrong, please contact with maintainer"
+            skipping \
+              "Found multiple virtual machines with the same name on hypervisor" \
+              "with '${vm_esxi_id}' and '${my_all_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+              "Please check it manually and rename the one of the virtual machine"
+            continue 2
           fi
           vm_esxi_id="${my_all_params[${real_vm_id}.vm_esxi_id]}"
         else
@@ -1698,10 +1712,16 @@ function command_create {
     elif [ ${#another_esxi_names[@]} -gt 0 ]
     then
       skipping \
-        "The virtual machine already exists on another hypervisor(s)" \
+        "The virtual machine also exists on another hypervisor(s)" \
         "${another_esxi_names[@]/#/* }"
+        "" \
+        "Please use the '-n' key to skip this check"
       continue
     fi
+
+    check_vm_params \
+      all \
+    || continue
 
     esxi_ssh_destination=(
       "${params[esxi_ssh_username]}"
@@ -1878,6 +1898,8 @@ function command_create {
         "It must be a just number"
       continue
     fi
+
+    echo "    Registered with id=\"${vm_esxi_id}\""
 
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
@@ -2425,6 +2447,303 @@ function command_show {
         "For complete information, please do not use the '-n' or '-i' keys"
     fi
   fi
+
+  exit 0
+}
+
+function command_update {
+  local \
+    supported_update_parameters=(
+      "local_iso_path"
+    )
+
+  if [ -z "${1}" ]
+  then
+    warning \
+      "Please specify a virtual machine name or names whose settings should be updated" \
+      "You can also specify hypervisor names on which all virtual machines will be updated" \
+      "" \
+      "Usage: ${my_name} ${command_name} <parameter_name> [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
+      "" \
+      "Supported parameter names:" \
+      "${supported_update_parameters[@]/#/* }" \
+      "" \
+      "Options: -i   Do not stop the script if any of hypervisors are not available" \
+      "         -n   Skip virtual machine availability check on all hypervisors" \
+      "         -sn  Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)" \
+      "" \
+      "Available names can be viewed using the '${my_name} ls' command"
+  elif [ "${1}" = "description" ]
+  then
+    echo "Update virtual machine(s) parameters"
+    return 0
+  elif [[ ! " ${supported_update_parameters[@]} " =~ " ${1} " ]]
+  then
+    warning \
+      "The '${command_name}' command only supports updating values of the following parameters:" \
+      "${supported_update_parameters[@]/#/* }" \
+      "" \
+      "Please specify a correct parameter name and try again"
+  fi
+
+  local \
+    update_parameter="${1}"
+  shift
+
+  parse_ini_file
+
+  local -A \
+    esxi_ids=() \
+    vm_ids=()
+  local \
+    esxi_ids_ordered=() \
+    vm_ids_ordered=()
+
+  parse_args_list "${@}"
+  check_dependencies
+  create_temp_dir
+  check_cache_params
+
+  if [ "${my_flags[skip_availability_check]}" = "yes" ]
+  then
+    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
+    get_real_vm_list \
+      full \
+      "${!esxi_ids[@]}"
+  else
+    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
+    get_real_vm_list \
+      full \
+      "${!my_config_esxi_list[@]}"
+  fi
+
+  progress "Completed"
+
+  local -A \
+    another_esxi_names=() \
+    params=()
+  local \
+    another_esxi_id="" \
+    cdrom_id="" \
+    cdrom_id_file="${temp_dir}/cdrom_id" \
+    cdrom_type="" \
+    cdrom_iso_path="" \
+    esxi_id="" \
+    esxi_iso_dir="" \
+    esxi_iso_path="" \
+    esxi_name="" \
+    esxi_ssh_destination=() \
+    real_vm_id="" \
+    vm_esxi_dir="" \
+    vm_esxi_id="" \
+    vm_id="" \
+    vm_iso_filename="" \
+    vm_name="" \
+    vm_real_id="" \
+    updated_vms=0
+
+  for vm_id in "${vm_ids_ordered[@]}"
+  do
+    vm_name="${my_config_vm_list[${vm_id}]}"
+    esxi_id="${my_all_params[${vm_id}.at]}"
+    esxi_name="${my_config_esxi_list[${esxi_id}]}"
+
+    get_params "${vm_id}|${esxi_id}"
+
+    info "Will update a '${update_parameter}' parameter at '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]})"
+
+    # Checking the hypervisor liveness
+    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
+    then
+      skipping \
+        "No connectivity to hypervisor (see virtual machine list preparation stage for details)"
+      continue
+    fi
+
+    vm_esxi_id=""
+    another_esxi_names=()
+    # Preparing the esxi list where the virtual machine is located
+    for real_vm_id in "${!my_real_vm_list[@]}"
+    do
+      if [ "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
+      then
+        if [ "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" ]
+        then
+          if [ -n "${vm_esxi_id}" ]
+          then
+            skipping \
+              "Found multiple virtual machines with the same name on hypervisor" \
+              "with '${vm_esxi_id}' and '${my_all_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+              "Please check it manually and rename the one of the virtual machine"
+            continue 2
+          fi
+          vm_esxi_id="${my_all_params[${real_vm_id}.vm_esxi_id]}"
+          vm_real_id="${real_vm_id}"
+        else
+          another_esxi_id="${my_all_params[${real_vm_id}.at]}"
+          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_all_params[${another_esxi_id}.esxi_hostname]})"
+        fi
+      fi
+    done
+
+    # Checking existance the virtual machine on another or this hypervisors
+    if [ -z "${vm_esxi_id}" ]
+    then
+      skipping \
+        "The virtual machine not exists on hypervisor"
+      continue
+    elif [ ${#another_esxi_names[@]} -gt 0 ]
+    then
+      skipping \
+        "The virtual machine also exists on another hypervisor(s)" \
+        "${another_esxi_names[@]/#/* }" \
+        "" \
+        "Please use the '-n' key to skip this check"
+      continue
+    fi
+
+    check_vm_params \
+      "${update_parameter}" \
+    || continue
+
+    if [ "${update_parameter}" = "local_iso_path" ]
+    then
+      update_parameter="special.${update_parameter}"
+    fi
+
+    if [ "${params[${update_parameter#special.}]}" = "${my_all_params[${vm_real_id}.${update_parameter}]}" ]
+    then
+      skipping \
+        "No update required, parameter already has the required value"
+      continue
+    fi
+
+    esxi_ssh_destination=(
+      "${params[esxi_ssh_username]}"
+      "${params[esxi_ssh_password]}"
+      "${params[esxi_hostname]}"
+      "${params[esxi_ssh_port]}"
+    )
+    vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
+    vm_iso_filename="${params[local_iso_path]##*/}"
+    esxi_iso_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso"
+    esxi_iso_path="${esxi_iso_dir}/${vm_iso_filename}"
+
+    progress "Checking existance the ISO image file on '${esxi_name}' hypervisor (test -f)"
+    run_remote_command \
+      "ssh" \
+      "${esxi_ssh_destination[@]}" \
+      "mkdir -p \"${esxi_iso_dir}\"" \
+      "|| Failed to create directory for storing ISO files on hypervisor" \
+    || continue
+
+    if ! \
+      run_remote_command \
+        "ssh" \
+        "${esxi_ssh_destination[@]}" \
+        "test -f \"${esxi_iso_path}\""
+    then
+      progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
+      run_remote_command \
+        "scp" \
+        "${esxi_ssh_destination[@]}" \
+        "${params[local_iso_path]}" \
+        "${esxi_iso_path}" \
+      || continue
+    fi
+
+    progress "Getting the identifier of virtual CD-ROM (govc device.ls cdrom-*)"
+
+    if ! \
+      GOVC_USERNAME="${params[esxi_ssh_username]}" \
+      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+      govc \
+        device.ls \
+        -dc=ha-datacenter \
+        -k=true \
+        -u="https://${params[esxi_hostname]}" \
+        -vm="${vm_name}" \
+        'cdrom-*' \
+      >"${cdrom_id_file}"
+    then
+      skipping \
+        "Unable to get the identifier of virtual CD-ROM"
+      continue
+    fi
+
+    # Read only the first line
+    if ! \
+      read -r \
+        cdrom_id \
+        cdrom_type \
+        cdrom_iso_path \
+      <"${cdrom_id_file}"
+    then
+      skipping \
+        "Failed to read a temporary file with cdrom identifier"
+    elif [ "${cdrom_id#cdrom-}" = "${cdrom_id}" ]
+    then
+      skipping \
+        "Unable to parse the cdrom identifier '${cdrom_id}', it must be prefixed with 'cdrom-'"
+    fi
+
+    progress "Update the '${update_parameter}' parameter (govc device.cdrom.insert)"
+
+    if ! \
+      GOVC_USERNAME="${params[esxi_ssh_username]}" \
+      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+      govc \
+        device.cdrom.insert \
+        -dc=ha-datacenter \
+        -ds="${params[vm_esxi_datastore]}" \
+        -device="${cdrom_id}" \
+        -k=true \
+        -u="https://${params[esxi_hostname]}" \
+        -vm="${vm_name}" \
+        ".iso/${vm_iso_filename}"
+    then
+      skipping \
+        "Unable to update the '${update_parameter}' parameter"
+      continue
+    fi
+
+    progress "Connect the ISO to CDROM (govc device.connect)"
+
+    if ! \
+      GOVC_USERNAME="${params[esxi_ssh_username]}" \
+      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+      govc \
+        device.connect \
+        -dc=ha-datacenter \
+        -k=true \
+        -u="https://${params[esxi_hostname]}" \
+        -vm="${vm_name}" \
+        "${cdrom_id}"
+    then
+      skipping \
+        "Unable to connect the ISO to CDROM"
+      continue
+    fi
+
+    echo "    Virtual machine parameter(s) is updated, continue"
+
+    remove_cachefile_for "${vm_real_id}"
+
+    vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_parameter#special.})"
+    let updated_vms+=1
+  done
+
+  remove_temp_dir
+
+  show_processed_vm_status
+
+  echo >&2
+  printf "Total: %d updated, %d skipped virtual machines\n" \
+    ${updated_vms} \
+    $((${#vm_ids[@]}-updated_vms)) \
+  >&2
+
+  show_remove_failed_cachefiles
 
   exit 0
 }
