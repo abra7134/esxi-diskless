@@ -10,7 +10,7 @@ MY_VERSION="2.210616"
 
 CACHE_DIR="${CACHE_DIR:-"${0%/*}/.cache"}"
 CACHE_VALID="${CACHE_VALID:-3600}" # 1 hour
-ESXI_CONFIG_PATH="${CONFIG_PATH:-"${0%.sh}.ini"}"
+ESXI_CONFIG_PATH="${ESXI_CONFIG_PATH:-"${0%.sh}.ini"}"
 
 my_name="${0}"
 my_dir="${0%/*}"

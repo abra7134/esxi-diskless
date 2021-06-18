@@ -33,6 +33,7 @@ $ docker run --rm -v /proc:/proc -v `pwd`:/build --cap-add=SYS_ADMIN esxi-diskle
 
 ##### Системные требования
 
+* govc из состава [gomomi](https://github.com/vmware/govmomi) проекта
 * openssh
 * sshpass
 
