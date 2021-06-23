@@ -36,6 +36,7 @@ my_dir="${0%/*}"
 #
 declare -A \
   my_all_params=() \
+  my_esxi_autostart_params=() \
   my_flags=() \
   my_config_esxi_list=() \
   my_config_vm_list=() \
@@ -52,6 +53,7 @@ my_all_params=(
   [0.esxi_ssh_username]="root"
   [0.local_hook_path]=""
   [0.local_iso_path]="REQUIRED"
+  [0.vm_autostart]="no"
   [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
   [0.vm_esxi_datastore]="datastore1"
   [0.vm_guest_type]="debian8-64"
@@ -79,8 +81,18 @@ my_params_map=(
   [guestos]="vm_guest_type"
   [memsize]="vm_memory_mb"
   [numvcpus]="vm_vcpus"
+  [special.vm_autostart]="vm_autostart"
   [special.vm_esxi_datastore]="vm_esxi_datastore"
   [special.local_iso_path]="local_iso_path"
+)
+
+# The list with supported parameters of autostart manager on ESXi
+my_esxi_autostart_params=(
+  [enabled]=""
+  [startDelay]=""
+  [stopDelay]=""
+  [waitForHeartbeat]=""
+  [stopAction]=""
 )
 
 set -o errexit
@@ -355,7 +367,12 @@ function esxi_vm_simple_command {
 
   if [ "${esxi_vm_operation}" = "destroy" ]
   then
-    remove_cachefile_for "${esxi_id}"
+    remove_cachefile_for \
+      "${esxi_id}" \
+      autostart_defaults \
+      autostart_seq \
+      filesystems \
+      vms
   fi
 
   local \
@@ -389,7 +406,7 @@ function esxi_vm_simple_command {
 # The function for retrieve the cachefile path for specified esxi_id or real_vm_id
 #
 #  Input: ${1}                      - The esxi_id or real_vm_id for which function the retrieve the actual cachefile path
-#         ${2}                      - Type of cache ('filesystem' or 'vms') if esxi_id specified in ${1}
+#         ${2}                      - Type of cache if esxi_id specified in ${1}
 #         ${CACHE_DIR}              - The directory for storing cache files
 #         ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
 #                                     {esxi_or_vm_identifier}.{parameter_name}
@@ -531,6 +548,12 @@ function get_real_vm_list {
     filesystems_names=() \
     params=()
   local \
+    autostart_defaults_map_filepath="" \
+    autostart_defaults_map_str="" \
+    autostart_seq_map_filepath="" \
+    autostart_seq_map_str="" \
+    autostart_param_name="" \
+    autostart_param_value="" \
     esxi_id="" \
     esxi_name="" \
     esxi_ssh_destination=() \
@@ -554,7 +577,7 @@ function get_real_vm_list {
   for esxi_id in "${@}"
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
-    progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd/esxcli)"
+    progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd and esxcli)"
 
     get_params "${esxi_id}"
     esxi_ssh_destination=(
@@ -563,6 +586,54 @@ function get_real_vm_list {
       "${params[esxi_hostname]}"
       "${params[esxi_ssh_port]}"
     )
+
+    autostart_defaults_map_filepath=$(
+      get_cachefile_path_for \
+        "${esxi_id}" \
+        autostart_defaults
+    )
+    update_cachefile \
+      "${autostart_defaults_map_filepath}" \
+      "ssh" \
+      "${esxi_ssh_destination[@]}" \
+      "vim-cmd hostsvc/autostartmanager/get_defaults" \
+      "|| Cannot get the autostart defaults settings (vim-cmd hostsvc/autostartmanager/get_defaults)" \
+    || true
+
+    if [    -f "${autostart_defaults_map_filepath}" \
+         -a -s "${autostart_defaults_map_filepath}" ]
+    then
+      while \
+        read -r \
+          -u 5 \
+          autostart_defaults_map_str
+      do
+        if [[ "${autostart_defaults_map_str}" =~ ^"(vim.host.AutoStartManager.SystemDefaults) {"$ ]]
+        then
+          continue
+        elif [[ "${autostart_defaults_map_str}" =~ ^"}",?$ ]]
+        then
+          break
+        elif [[ "${autostart_defaults_map_str}" =~ ^[[:blank:]]*([^[:blank:]=]+)[[:blank:]]*=[[:blank:]]*\"?([^[:blank:]\",]*)\"?,?$ ]]
+        then
+          autostart_param_name="${BASH_REMATCH[1]}"
+          autostart_param_value="${BASH_REMATCH[2]}"
+          if [ -v my_esxi_autostart_params[${autostart_param_name}] ]
+          then
+            my_all_params[${esxi_id}.esxi_autostart_${autostart_param_name,,}]="${autostart_param_value}"
+          else
+            error \
+              "The unknown '${autostart_param_name}' parameter obtained from hypervisor" \
+              "Let a maintainer know or solve the problem yourself"
+          fi
+        else
+          error \
+            "Cannot parse the '${autostart_defaults_map_str}' string obtained from hypervisor" \
+            "Let a maintainer know or solve the problem yourself"
+        fi
+      done \
+      5<"${autostart_defaults_map_filepath}"
+    fi
 
     filesystems_map_filepath=$(
       get_cachefile_path_for \
@@ -574,7 +645,7 @@ function get_real_vm_list {
       "ssh" \
       "${esxi_ssh_destination[@]}" \
       "esxcli storage filesystem list" \
-      "|| Cannot get list of storage filesystems on hypervisor (esxcli)" \
+      "|| Cannot get list of storage filesystems on hypervisor (esxcli storage filesystem list)" \
     || true
 
     filesystem_id=0
@@ -617,7 +688,7 @@ function get_real_vm_list {
       "type -f awk cat mkdir vim-cmd >/dev/null" \
       "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
       "vim-cmd vmsvc/getallvms" \
-      "|| Cannot get list of virtual machines on hypervisor (vim-cmd)" \
+      "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)" \
     || true
 
     if [    -f "${vms_map_filepath}" \
@@ -741,6 +812,81 @@ function get_real_vm_list {
       fi
     fi
 
+    if [ "${get_type}" = "full" ]
+    then
+      autostart_seq_map_filepath=$(
+        get_cachefile_path_for \
+          "${esxi_id}" \
+          autostart_seq
+      )
+      update_cachefile \
+        "${autostart_seq_map_filepath}" \
+        "ssh" \
+        "${esxi_ssh_destination[@]}" \
+        "vim-cmd hostsvc/autostartmanager/get_autostartseq" \
+        "|| Cannot get the autostart sequence settings (vim-cmd hostsvc/autostartmanager/get_autostartseq)" \
+      || true
+
+      if [    -f "${autostart_seq_map_filepath}" \
+           -a -s "${autostart_seq_map_filepath}" ]
+      then
+        real_vm_id=""
+        while \
+          read -r \
+            -u 5 \
+            autostart_seq_map_str
+        do
+          if [[ "${autostart_seq_map_str}" =~ ^"("("vim.host.AutoStartManager.AutoPowerInfo")") ["$ ]]
+          then
+            continue
+          elif [[ "${autostart_seq_map_str}" =~ ^"]"$ ]]
+          then
+            break
+          elif [[ "${autostart_seq_map_str}" =~ ^[[:blank:]]*"(vim.host.AutoStartManager.AutoPowerInfo) {"$ ]]
+          then
+            continue
+          elif [[ "${autostart_seq_map_str}" =~ ^[[:blank:]]*"}",?$ ]]
+          then
+            continue
+          elif [[ "${autostart_seq_map_str}" =~ ^[[:blank:]]*([^[:blank:]=]+)[[:blank:]]*=[[:blank:]]*\"?([^[:blank:]\",]*)\"?,?$ ]]
+          then
+            autostart_param_name="${BASH_REMATCH[1]}"
+            autostart_param_value="${BASH_REMATCH[2]}"
+            if [ "${autostart_param_name}" = "key" ]
+            then
+              if [[ "${autostart_param_value}" =~ ^\'vim\.VirtualMachine:([[:digit:]]+)\'$ ]]
+              then
+                for real_vm_id in "${!my_real_vm_list[@]}"
+                do
+                  if [    "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" \
+                       -a "${my_all_params[${real_vm_id}.vm_esxi_id]}" = "${BASH_REMATCH[1]}" ]
+                  then
+                    continue 2
+                  fi
+                done
+                real_vm_id=""
+              else
+                error \
+                  "Cannot parse the 'key' parameter value '${autostart_param_value}' obtained from hypervisor" \
+                  "Let a maintainer know or solve the problem yourself"
+              fi
+            else
+              if [    "${autostart_param_name}" = "startOrder" \
+                   -a -v my_real_vm_list[${real_vm_id}] ]
+              then
+                if [[ "${autostart_param_value}" =~ ^[[:digit:]]+$ ]]
+                then
+                  my_all_params[${real_vm_id}.special.vm_autostart]="yes"
+                else
+                  my_all_params[${real_vm_id}.special.vm_autostart]="no"
+                fi
+              fi
+            fi
+          fi
+        done \
+        5<"${autostart_seq_map_filepath}"
+      fi
+    fi
   done
 
   return 0
@@ -791,6 +937,11 @@ function parse_ini_file {
         [[ "${value}" =~ ^([[:alnum:]_/\.\-]+)?$ ]] \
         || \
           error="it must be empty or consist of characters (in regex notation): [[:alnum:]_.-/]"
+        ;;
+      "vm_autostart" )
+        [[ "${value}" =~ ^yes|no$ ]] \
+        || \
+          error="it must be 'yes' or 'no' value"
         ;;
       "vm_ipv4_address"|"vm_ipv4_gateway" )
         [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
@@ -1254,31 +1405,37 @@ function ping_host {
   &>/dev/null
 }
 
-# The function for removing the cachefile for specified esxi_id or real_vm_id
+# The function for removing the cachefiles for specified esxi_id or real_vm_id
 #
-#  Input: ${1} - The esxi_id or real_vm_id for which cachefile will be removed
-# Return: 0    - The cachefile path is returned correctly
+#  Input: ${1}    - The esxi_id or real_vm_id for which cachefile will be removed
+#         ${2}..  - Type of caches if esxi_id specified in ${1}
+# Return: 0       - The cachefile path is returned correctly
 #
 function remove_cachefile_for {
   local \
     cachefile_for="${1}" \
     cachefile_path=""
+  shift
 
-  cachefile_path=$(
-    get_cachefile_path_for \
-      "${cachefile_for}"
-  )
+  for cachefile_type in "${@}"
+  do
+    cachefile_path=$(
+      get_cachefile_path_for \
+        "${cachefile_for}" \
+        "${cachefile_type}"
+    )
 
-  if [ -f "${cachefile_path}" ]
-  then
-    echo "    Remove the cache file \"${cachefile_path}\""
-    if ! \
-      rm "${cachefile_path}"
+    if [ -f "${cachefile_path}" ]
     then
-      echo "    Failed to remove the cache file \"${cachefile_path}\", skipping"
-      remove_failed_cachefiles[${cachefile_for}]="${cachefile_path}"
+      echo "    Remove the cache file \"${cachefile_path}\""
+      if ! \
+        rm "${cachefile_path}"
+      then
+        echo "    Failed to remove the cache file \"${cachefile_path}\", skipping"
+        remove_failed_cachefiles[${cachefile_for}]="${cachefile_path}"
+      fi
     fi
-  fi
+  done
 
   return 0
 }
@@ -1623,6 +1780,7 @@ function command_create {
   local \
     another_esxi_id="" \
     another_vm_esxi_id="" \
+    autostart_param="" \
     esxi_id="" \
     esxi_iso_dir="" \
     esxi_iso_path="" \
@@ -1722,6 +1880,31 @@ function command_create {
     check_vm_params \
       all \
     || continue
+
+    if [    "${params[vm_autostart]}" = "yes" \
+         -a "${params[esxi_autostart_enabled]}" != "true" ]
+    then
+      # Clear the cache in advance,
+      # since it is very likely to change the settings of the autostart manager after next message
+      remove_cachefile_for \
+        "${esxi_id}" \
+        autostart_defaults
+      skipping \
+        "The 'vm_autostart' parameter is specified, but on hypervisor autostart manager is off" \
+        "Turn on the autostart manager on hypervisor and try again"
+      continue
+    else
+      for autostart_param in "${!my_esxi_autostart_params[@]}"
+      do
+        if [ ! -v params[esxi_autostart_${autostart_param,,}] ]
+        then
+          skipping \
+            "Cannot get autostart manager default setting '${autostart_param}' from hypervisor" \
+            "Let a maintainer know or solve the problem yourself"
+          continue 2
+        fi
+      done
+    fi
 
     esxi_ssh_destination=(
       "${params[esxi_ssh_username]}"
@@ -1883,7 +2066,10 @@ function command_create {
       "|| Failed to register a virtual machine on hypervisor" \
     || continue
 
-    remove_cachefile_for "${esxi_id}"
+    remove_cachefile_for \
+      "${esxi_id}" \
+      filesystems \
+      vms
 
     if ! \
       vm_esxi_id=$(< "${vm_id_filepath}")
@@ -1900,6 +2086,30 @@ function command_create {
     fi
 
     echo "    Registered with id=\"${vm_esxi_id}\""
+
+    if [ "${params[vm_autostart]}" = "yes" ]
+    then
+      progress "Enable the auto-start of the virtual machine (vim-cmd hostsvc/autostartmanager/update_autostartentry)"
+      for autostart_param in "${!my_esxi_autostart_params[@]}"
+      do
+        if [ "${autostart_param}" != "enabled" ]
+        then
+          echo "    ${autostart_param}='${params[esxi_autostart_${autostart_param,,}]}'"
+        fi
+      done
+
+      run_remote_command \
+        "ssh" \
+        "${esxi_ssh_destination[@]}" \
+        "vim-cmd hostsvc/autostartmanager/update_autostartentry ${vm_esxi_id} powerOn ${params[esxi_autostart_startdelay]} 1 systemDefault ${params[esxi_autostart_stopdelay]} systemDefault >/dev/null" \
+        "|| Failed to update the autostart settings on hypervisor" \
+      || continue
+
+      remove_cachefile_for \
+        "${esxi_id}" \
+        autostart_defaults \
+        autostart_seq
+    fi
 
     if [ "${my_flags[destroy_on_another]}" = "yes" ]
     then
@@ -2126,11 +2336,13 @@ function command_ls {
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
           "$(print_param vm_guest_type ${vm_id})"
-        printf -- "    vm_memory_mb=\"%s\" vm_vcpus=\"%s\" vm_timezone=\"%s\" vm_esxi_datastore=\"%s\"\n" \
+        printf -- "    vm_autostart=\"%s\" vm_esxi_datastore=\"%s\"\n" \
+          "$(print_param vm_autostart ${vm_id})" \
+          "$(print_param vm_esxi_datastore ${vm_id})"
+        printf -- "    vm_memory_mb=\"%s\" vm_vcpus=\"%s\" vm_timezone=\"%s\"\n" \
           "$(print_param vm_memory_mb ${vm_id})" \
           "$(print_param vm_vcpus ${vm_id})" \
-          "$(print_param vm_timezone ${vm_id})" \
-          "$(print_param vm_esxi_datastore ${vm_id})"
+          "$(print_param vm_timezone ${vm_id})"
         printf -- "    vm_network_name=\"%s\" vm_dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
           "$(print_param vm_dns_servers ${vm_id})"
@@ -2727,7 +2939,9 @@ function command_update {
 
     echo "    Virtual machine parameter(s) is updated, continue"
 
-    remove_cachefile_for "${vm_real_id}"
+    remove_cachefile_for \
+      "${vm_real_id}" \
+      ""
 
     vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_parameter#special.})"
     let updated_vms+=1
