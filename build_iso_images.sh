@@ -970,11 +970,11 @@ EOF
 
   show_processed_builds_status
 
-  echo >&2
-  printf "Total: %d builded, %d skipped images" \
+  printf -- \
+  >&2 \
+    "\nTotal: %d builded, %d skipped images" \
     ${builded_images} \
-    $((${#builds_ids[@]}-builded_images)) \
-  >&2
+    $((${#builds_ids[@]}-builded_images))
 }
 
 function command_ls {
@@ -1023,28 +1023,32 @@ function command_ls {
   do
     build_name="${my_builds_list[${build_id}]}"
 
-    printf -- "${COLOR_GREEN}%s${COLOR_NORMAL} (on '%s' base layer)\n" \
+    printf -- \
+      "${COLOR_GREEN}%s${COLOR_NORMAL} (on '%s' base layer)\n" \
       "${build_name}" \
       "$(print_param base_layer ${build_id})"
     if [ -n "${my_all_params[${build_id}.repo_url]}" ]
     then
-      printf -- "  repo_url=\"%s\"\n" \
+      printf -- \
+        "  repo_url=\"%s\"\n" \
         "$(print_param repo_url ${build_id})"
-      printf -- "  repo_checkout=\"%s\" repo_clone_into=\"%s\" repo_depth=\"%s\"\n" \
+      printf -- \
+        "  repo_checkout=\"%s\" repo_clone_into=\"%s\" repo_depth=\"%s\"\n" \
         "$(print_param repo_checkout ${build_id})" \
         "$(print_param repo_clone_into ${build_id})" \
         "$(print_param repo_depth ${build_id})"
-      printf -- "  run_from_repo=\"%s\"\n" \
+      printf -- \
+        "  run_from_repo=\"%s\"\n" \
         "$(print_param run_from_repo ${build_id})"
     fi
-    printf -- "\n"
+    echo
 
   done
 
-  printf -- "Total: %d (of %d) images displayed\n" \
+  printf -- \
+    "Total: %d (of %d) images displayed\n" \
     "${#builds_ids[@]}" \
     "${#my_builds_list[@]}"
-  echo
 
   exit 0
 }

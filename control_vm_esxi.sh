@@ -2346,7 +2346,8 @@ function command_ls {
 
   for esxi_id in "${!esxi_ids[@]}"
   do
-    printf -- "${ping_status[${esxi_id}]}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
+    printf -- \
+      "${ping_status[${esxi_id}]}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
       "${my_config_esxi_list[${esxi_id}]}" \
       "$(print_param esxi_ssh_username ${esxi_id})" \
       "$(print_param esxi_hostname ${esxi_id})" \
@@ -2356,39 +2357,46 @@ function command_ls {
     do
       if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" ]
       then
-        printf -- "\n"
-        printf -- "  ${ping_status[${vm_id}]}%s${COLOR_NORMAL} (%s@%s:%s) [%s]:\n" \
+        printf -- \
+          "\n  ${ping_status[${vm_id}]}%s${COLOR_NORMAL} (%s@%s:%s) [%s]:\n" \
           "${my_config_vm_list[${vm_id}]}" \
           "$(print_param vm_ssh_username ${vm_id})" \
           "$(print_param vm_ipv4_address ${vm_id})" \
           "$(print_param vm_ssh_port ${vm_id})" \
           "$(print_param vm_guest_type ${vm_id})"
-        printf -- "    vm_autostart=\"%s\" vm_esxi_datastore=\"%s\"\n" \
+        printf -- \
+          "    vm_autostart=\"%s\" vm_esxi_datastore=\"%s\"\n" \
           "$(print_param vm_autostart ${vm_id})" \
           "$(print_param vm_esxi_datastore ${vm_id})"
-        printf -- "    vm_memory_mb=\"%s\" vm_vcpus=\"%s\" vm_timezone=\"%s\"\n" \
+        printf -- \
+          "    vm_memory_mb=\"%s\" vm_vcpus=\"%s\" vm_timezone=\"%s\"\n" \
           "$(print_param vm_memory_mb ${vm_id})" \
           "$(print_param vm_vcpus ${vm_id})" \
           "$(print_param vm_timezone ${vm_id})"
-        printf -- "    vm_network_name=\"%s\" vm_dns_servers=\"%s\"\n" \
+        printf -- \
+          "    vm_network_name=\"%s\" vm_dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
           "$(print_param vm_dns_servers ${vm_id})"
-        printf -- "    vm_ipv4_gateway=\"%s\" vm_ipv4_netmask=\"%s\"\n" \
+        printf -- \
+          "    vm_ipv4_gateway=\"%s\" vm_ipv4_netmask=\"%s\"\n" \
           "$(print_param vm_ipv4_gateway ${vm_id})" \
           "$(print_param vm_ipv4_netmask ${vm_id})"
-        printf -- "    local_iso_path=\"%s\" local_hook_path=\"%s\"\n" \
+        printf -- \
+          "    local_iso_path=\"%s\" local_hook_path=\"%s\"\n" \
           "$(print_param local_iso_path ${vm_id})" \
           "$(print_param local_hook_path ${vm_id})"
       fi
     done
     echo
   done
-  printf -- "Total: %d (of %d) hypervisor(s) and %d (of %d) virtual machine(s) them displayed\n" \
+
+  printf -- \
+    "Total: %d (of %d) hypervisor(s) and %d (of %d) virtual machine(s) them displayed\n" \
     "${#esxi_ids[@]}" \
     "${#my_config_esxi_list[@]}" \
     "${#vm_ids[@]}" \
     "${#my_config_vm_list[@]}"
-  printf -- "\n"
+
   exit 0
 }
 
@@ -2490,7 +2498,8 @@ function command_show {
       color_alive="${COLOR_GREEN}"
     fi
 
-    printf -- "${color_alive}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
+    printf -- \
+      "${color_alive}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
       "${esxi_name}" \
       "$(print_param esxi_ssh_username ${esxi_id})" \
       "$(print_param esxi_hostname ${esxi_id})" \
@@ -2547,16 +2556,18 @@ function command_show {
       fi
     done
 
-    printf -- "\n"
-    printf -- "   %-${column_width}s | %-${column_width}s | %-${column_width}s\n" \
+    printf -- \
+      "\n   %-${column_width}s | %-${column_width}s | %-${column_width}s\n" \
       "In configuration file:" \
       "On hypervisor:" \
       "Also finded on"
-    printf -- "   %-${column_width}s | %-${column_width}s | %-${column_width}s\n" \
+    printf -- \
+      "   %-${column_width}s | %-${column_width}s | %-${column_width}s\n" \
       "(${#config_vm_ids[@]} virtual machines)" \
       "(${#real_vm_ids[@]} virtual machines)" \
       "another hypervisors:"
-    printf -- "  ${separator_line}\n"
+    printf -- \
+      "  ${separator_line}\n"
 
     for config_vm_id in "${!config_vm_ids[@]}"
     do
@@ -2669,10 +2680,10 @@ function command_show {
   echo
   done
 
-  printf -- "Total: %d (of %d) hypervisor(s) differences displayed\n" \
+  printf -- \
+    "Total: %d (of %d) hypervisor(s) differences displayed\n" \
     "${#esxi_ids[@]}" \
     "${#my_config_esxi_list[@]}"
-  printf -- "\n"
 
   if [ "${displayed_alived}" = "yes" ]
   then
