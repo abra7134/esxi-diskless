@@ -54,7 +54,10 @@ my_options_map=(
 set -o errexit
 set -o errtrace
 
-if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
+if ! \
+  source \
+    "${my_dir}"/functions.sh.inc \
+  2>/dev/null
 then
   echo >&2 "!!! ERROR: Can't load a functions file (functions.sh.inc)"
   echo >&2 "           Please check archive of this script or use 'git checkout --force' command if it cloned from git"
@@ -275,7 +278,10 @@ function get_hash {
 function skipping {
   if [ -n "${1}" ]
   then
-    _print >&2 skipping "${@}"
+    _print \
+      skipping \
+      "${@}" \
+    >&2
 
     if [ ${#builds_ids[@]} -gt 0 ]
     then
@@ -598,10 +604,10 @@ function show_processed_builds_status {
       fi
 
       printf -- \
+      >&2 \
         "  * %-30b %b\n" \
         "${COLOR_WHITE}${build_name}${COLOR_NORMAL}" \
-        "${build_status}" \
-      >&2
+        "${build_status}"
 
     done
   fi

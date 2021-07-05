@@ -105,7 +105,10 @@ my_params_map=(
 set -o errexit
 set -o errtrace
 
-if ! source "${my_dir}"/functions.sh.inc 2>/dev/null
+if ! \
+  source \
+    "${my_dir}"/functions.sh.inc \
+  2>/dev/null
 then
   echo >&2 "!!! ERROR: Can't load a functions file (functions.sh.inc)"
   echo >&2 "           Please check archive of this script or use 'git checkout --force' command if it cloned from git"
@@ -1421,10 +1424,10 @@ function parse_args_list {
 #
 function ping_host {
   ping \
+  &>/dev/null \
     -c 1 \
     -w 1 \
-    "${1}" \
-  &>/dev/null
+    "${1}"
 }
 
 # The function for removing the cachefiles for specified esxi_id or real_vm_id
@@ -1671,10 +1674,10 @@ function show_processed_vm_status {
       fi
 
       printf -- \
+      >&2 \
         "  * %-30b %b\n" \
         "${COLOR_WHITE}${vm_name}${COLOR_NORMAL}/${esxi_name}" \
-        "${vm_status}" \
-      >&2
+        "${vm_status}"
 
     done
   fi
@@ -1710,7 +1713,10 @@ function show_remove_failed_cachefiles {
 function skipping {
   if [ -n "${1}" ]
   then
-    _print >&2 skipping "${@}"
+    _print \
+      skipping \
+      "${@}" \
+    >&2
 
     if [ ${#vm_ids[@]} -gt 0 ]
     then
@@ -2251,12 +2257,12 @@ function command_create {
 
   show_processed_vm_status
 
-  echo >&2
-  printf "Total: %d created, %d created but no pinging, %d skipped virtual machines\n" \
+  printf -- \
+  >&2 \
+    "\nTotal: %d created, %d created but no pinging, %d skipped virtual machines\n" \
     ${runned_vms} \
     ${no_pinging_vms} \
-    $((${#vm_ids[@]}-runned_vms-no_pinging_vms)) \
-  >&2
+    $((${#vm_ids[@]}-runned_vms-no_pinging_vms))
 
   show_remove_failed_cachefiles
 }
@@ -2886,13 +2892,13 @@ function command_update {
       GOVC_USERNAME="${params[esxi_ssh_username]}" \
       GOVC_PASSWORD="${params[esxi_ssh_password]}" \
       govc \
+      >"${cdrom_id_file}" \
         device.ls \
         -dc=ha-datacenter \
         -k=true \
         -u="https://${params[esxi_hostname]}" \
         -vm="${vm_name}" \
-        'cdrom-*' \
-      >"${cdrom_id_file}"
+        'cdrom-*'
     then
       skipping \
         "Unable to get the identifier of virtual CD-ROM"
@@ -2902,10 +2908,10 @@ function command_update {
     # Read only the first line
     if ! \
       read -r \
+      <"${cdrom_id_file}" \
         cdrom_id \
         cdrom_type \
-        cdrom_iso_path \
-      <"${cdrom_id_file}"
+        cdrom_iso_path
     then
       skipping \
         "Failed to read a temporary file with cdrom identifier"
@@ -2967,11 +2973,11 @@ function command_update {
 
   show_processed_vm_status
 
-  echo >&2
-  printf "Total: %d updated, %d skipped virtual machines\n" \
+  printf -- \
+  >&2 \
+    "\nTotal: %d updated, %d skipped virtual machines\n" \
     ${updated_vms} \
-    $((${#vm_ids[@]}-updated_vms)) \
-  >&2
+    $((${#vm_ids[@]}-updated_vms))
 
   show_remove_failed_cachefiles
 

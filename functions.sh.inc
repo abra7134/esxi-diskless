@@ -72,21 +72,35 @@ function _print {
 # Wrapper-functions to print certain type of messages
 #
 function attention {
-  _print >&2 attention "${@}"
+  _print \
+    attention \
+    "${@}" \
+  >&2
 }
 function error {
-  _print >&2 error "${@}"
+  _print \
+    error \
+    "${@}" \
+  >&2
   exit 1
 }
 function warning {
-  _print >&2 warning "${@}"
+  _print \
+    warning \
+    "${@}" \
+  >&2
   exit 0
 }
 function info {
-  _print info "${@}"
+  _print \
+    info \
+    "${@}"
 }
 function progress {
-  _print >&2 progress "${@}"
+  _print \
+    progress \
+    "${@}" \
+  >&2
 }
 
 # Function to print 'internal' message with stack trace
@@ -110,25 +124,28 @@ function internal {
   if [ -z "${1}" ]
   then
     _print \
+    >&2 \
       "shit(${BASH_SUBSHELL})" \
       "Happen, let a maintainer know or solve the problem yourself" \
       "" \
       "Stack trace:" \
-      "${stack_trace_message[@]}" \
-    >&2
+      "${stack_trace_message[@]}"
   else
     _print \
+    >&2 \
       "internal(${BASH_SUBSHELL})" \
       "${@}" \
       "" \
       "Stack trace:" \
-      "${stack_trace_message[@]}" \
-    >&2
+      "${stack_trace_message[@]}"
   fi
 
   if [ -n "${post_command}" ]
   then
-    if ! declare -F "${post_command}" >/dev/null
+    if ! \
+      declare \
+        -F "${post_command}" \
+      >/dev/null
     then
       post_command="" \
         internal \
@@ -173,7 +190,10 @@ function check_commands {
   do
     required_command="${1}"
 
-    if type -P "${required_command}" >/dev/null
+    if \
+      type \
+        -P "${required_command}" \
+      >/dev/null
     then
       if [ "${operation}" = "print" ]
       then
@@ -418,7 +438,10 @@ function run_command {
   echo
 
   command_name="${1:-help}"
-  if ! declare -F "command_${command_name}" >/dev/null
+  if ! \
+    declare \
+      -F "command_${command_name}" \
+    >/dev/null
   then
     error \
       "Command '${command_name}' is not exists, please run '${my_name} help' or just '${my_name}' command"
