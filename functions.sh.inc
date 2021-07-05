@@ -3,12 +3,18 @@ let _progress_number=1
 # Added dependencies from this include file
 MY_DEPENDENCIES+=("tty")
 
+# Function to print certain type of messages
+#
+#  Input: ${1}   - Type of print: 'info', 'progress', any else
+#         ${2..} - The message strings
+# Return: 0      - The message is printed
+#
 function _print {
   local \
     print_type="${1}"
-  shift
 
-  if [[ -z "${1}" ]]
+  shift
+  if [ "${#}" -lt 1 ]
   then
     return 0
   fi
@@ -59,31 +65,35 @@ function _print {
       echo
       ;;
   esac
+
+  return 0
 }
 
+# Wrapper-functions to print certain type of messages
+#
 function attention {
   _print >&2 attention "${@}"
 }
-
-
 function error {
   _print >&2 error "${@}"
   exit 1
 }
-
 function warning {
   _print >&2 warning "${@}"
   exit 0
 }
-
 function info {
   _print info "${@}"
 }
-
 function progress {
   _print >&2 progress "${@}"
 }
 
+# Function to print 'internal' message with stack trace
+#
+#  Input: ${post_command} - The fuction to run before exit from script
+# Return: 2               - Always
+#
 function internal {
   local \
     i="" \
@@ -92,7 +102,9 @@ function internal {
   # Prepare the stack trace message for debugging
   for (( i=1; i<${#FUNCNAME[@]}; i++ ))
   do
-    stack_trace_message+=("-> ${FUNCNAME[i]}() at ${BASH_SOURCE[i]}:${BASH_LINENO[i-1]}")
+    stack_trace_message+=(
+      "-> ${FUNCNAME[i]}() at ${BASH_SOURCE[i]}:${BASH_LINENO[i-1]}"
+    )
   done
 
   if [ -z "${1}" ]
@@ -119,7 +131,8 @@ function internal {
     if ! declare -F "${post_command}" >/dev/null
     then
       post_command="" \
-        internal "The value of 'post_command' is not a function, please inform a maintainer"
+        internal \
+          "The value of 'post_command' is not a function, please inform a maintainer"
     fi
 
     "${post_command}"
@@ -128,27 +141,37 @@ function internal {
   exit 2
 }
 
+# Function to check presence commands in system where script is runned
+#
+#  Input: ${1}   - The type of operation: 'print' or 'check'
+#         ${2..} - The list of checked commands
+# Return: 0      - The all commands are present in the system
+#
 function check_commands {
   local \
     operation="${1}"
 
-  if [   "${operation}" != "print" \
-      -a "${operation}" != "check" ]
-  then
-    internal "The first operand must be 'print' or 'check', but not '${operation}'"
-  fi
+  case "${operation}"
+  in
+    "print" )
+      echo "Dependencies for this script:"
+      echo -n "  "
+      ;;
+    "check" )
+      ;;
+    * )
+      internal \
+        "The first operand must be 'print' or 'check', but not '${operation}'"
+      ;;
+  esac
+
+  local \
+    required_command=""
+
   shift
-
-  if [ "${operation}" = "print" ]
-  then
-    echo "Dependencies for this script:"
-    echo -n "  "
-  fi
-
   while [ -n "${1}" ]
   do
-    local \
-      required_command="${1}"
+    required_command="${1}"
 
     if type -P "${required_command}" >/dev/null
     then
@@ -169,8 +192,14 @@ function check_commands {
     fi
     shift
   done
+
+  return 0
 }
 
+# Function to check script runned by 'root' user
+#
+# Return: 0 - The script runned under 'root' user
+#
 function check_root_run {
   progress "Checking by runned root user"
   if [ ${EUID} -gt 0 ]
@@ -179,15 +208,25 @@ function check_root_run {
       "For properly run this script, it's should be runned by ROOT user only" \
       "You can use 'sudo' command for this"
   fi
+
+  return 0
 }
 
+# Function to check of dependencies of script
+#
+#  Input: ${MY_DEPENDENCIES[@]} - The list with commands needed to proprely run of script
+# Return: 0                     - The all dependencies is installed on system
+#
 function check_dependencies {
   progress "Checking dependencies"
   check_commands \
     check \
     "${MY_DEPENDENCIES[@]}"
+
+  return 0
 }
 
+# Function-definition of 'help' command
 function command_help {
   if [ "${1}" = "description" ]
   then
@@ -222,6 +261,13 @@ function command_help {
   exit 0
 }
 
+# Function to find duplicate in list
+#
+#  Input: ${1}         - The item to be finded
+#         ${2..}       - The list in which it's find the duplicate
+# Return: 0            - The duplicate is finded
+#         1            - Otherwise
+#
 function finded_duplicate {
   local \
     find_item="${1}" \
@@ -262,9 +308,17 @@ function get_params {
   return 0
 }
 
+# Function to initialize of color variables if script runned on tty
+#
+# Modify: ${COLOR_*}   - The ASCII-code to color printing mode
+#         ${UNDERLINE} - The ASCII-code to underline printing mode
+#         ${NORMAL}    - The ASCII-code to revert the normal printing mode
+# Return: 0            - Always
+#
 function init_colors {
   # This simply check tty or not is used
-  if tty --silent
+  if \
+    tty --silent
   then
     COLOR_GRAY="\e[1;30m"
     COLOR_GREEN="\e[1;32m"
@@ -302,13 +356,25 @@ function print_param() {
   return 0
 }
 
+# Function to create a temporary directory
+#
+# Modify: ${temp_dir} - The created temporary directory path
+# Return: 0           - The temporary directory is created
+#
 function create_temp_dir {
   progress "Create a temporary directory"
   temp_dir=$(mktemp -d) \
   || internal "Can't create a temporary directory"
   echo "    The '${temp_dir}' directory is created"
+
+  return 0
 }
 
+# Function to remove a temporary directory
+#
+#  Input: ${temp_dir} - The temporary directory path
+# Return: 0           - The temporary directory is removed
+#
 function remove_temp_dir {
   if [ -d "${temp_dir}" ]
   then
@@ -321,6 +387,11 @@ function remove_temp_dir {
   return 0
 }
 
+# Function to run command
+#
+#  Input: ${1}   - The command name for which the 'command_${1}' function must exists
+# Return: 0      - The command is successful runned
+#
 function run_command {
   local \
     command_name="" \
