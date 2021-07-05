@@ -361,3 +361,49 @@ function run_command {
 
   return 0
 }
+
+# Function to print warning with usage of the command
+#
+#  Input: ${@}                     - The usage message
+#         ${options_supported[@]}  - The array of supported options by command (see also ${my_options_map})
+# Return: Don't return
+#
+function show_usage {
+  local \
+    first_line="yes" \
+    option="" \
+    option_message="" \
+    usage_message=()
+
+  while [ "${#}" -gt 0 ]
+  do
+    usage_message+=("${1}")
+    shift
+  done
+
+  usage_message+=("")
+  for option in "${options_supported[@]}"
+  do
+    if [ -v my_options_map[${option}] ]
+    then
+      printf \
+        -v option_message \
+        -- \
+        "%-9s %-4s %s"\
+        "${first_line:+Options:}" \
+        "${option}" \
+        "${my_options_map[${option}]}"
+      usage_message+=(
+        "${option_message}"
+      )
+      first_line=""
+    fi
+  done
+
+  usage_message+=(
+    ""
+    "Available names can be viewed using the '${my_name} ls' command"
+  )
+
+  warning "${usage_message[@]}"
+}

@@ -33,7 +33,8 @@ OPTS_MKISOFS="-input-charset utf-8 -volid ubuntu"
 #
 declare -A \
   my_all_params=() \
-  my_flags=() \
+  my_options=() \
+  my_options_map=() \
   my_builds_list=()
 
 # Init default values
@@ -44,6 +45,10 @@ my_all_params=(
   [0.repo_clone_into]="repo/"
   [0.repo_depth]=1
   [0.run_from_repo]="/deploy.sh"
+)
+# The map with supported command line options and him descriptions
+my_options_map=(
+  [-f]="Force rebuild the already builded templates"
 )
 
 set -o errexit
@@ -286,10 +291,11 @@ function skipping {
 
 # Function for parsing the list of command line arguments specified at the input
 # and preparing 2 arrays with identifiers of encountered builds,
-# and array with flags for script operation controls
+# and array with options for script operation controls
 #
 #  Input: ${@}                     - List of virtual machines names
-# Modify: ${my_flags[@]}           - Keys - flags names, values - "yes" string
+#         ${options_supported[@]}  - List of supported options supported by the command
+# Modify: ${my_options[@]}         - Keys - options names, values - "yes" string
 #         ${builds_ids[@]}         - Keys - identifiers of builds, values - empty string
 #         ${builds_ids_ordered[@]} - Values - identifiers of builds in order of their indication
 # Return: 0                        - Always
@@ -299,20 +305,31 @@ function parse_args_list {
     arg_name="" \
     build_id=""
 
-  local -A \
-    my_flags_map=(
-      [-f]="force"
-    )
-
   builds_ids=()
   builds_ids_ordered=()
 
   for arg_name in "${@}"
   do
-    if [ -v my_flags_map["${arg_name}"] ]
+    if [[ "${arg_name}" =~ ^- ]]
     then
-      my_flags[${my_flags_map[${arg_name}]}]="yes"
-      continue
+      if \
+        finded_duplicate \
+          "${arg_name}" \
+          "${options_supported[@]}"
+      then
+        if [ -v my_options_map["${arg_name}"] ]
+        then
+          my_options[${arg_name}]="yes"
+          continue
+        else
+          internal \
+            "The '${arg_name}' option specified at \${options_supported[@]} don't finded at \${my_options_map[@]} array"
+        fi
+      else
+        warning \
+          "The '${arg_name}' option is not supported by '${command_name}' command" \
+          "Please see the use of command by running: '${my_name} ${command_name}'"
+      fi
     fi
 
     for build_id in "${!my_builds_list[@]}"
@@ -457,6 +474,11 @@ function parse_ini_file {
         error_config \
           "Wrong name '${config_section_name}' for INI-section, must consist of characters (in regex notation): [[:alnum:]_.-]" \
           "Please correct the name and try again"
+      elif [[ "${config_section_name}" =~ ^- ]]
+      then
+        error_config \
+          "The INI-section must not start with a '-' character as it is used to specify options" \
+          "Please correct the name and try again"
       elif \
         finded_duplicate \
           "${config_section_name}" \
@@ -592,20 +614,21 @@ function show_processed_builds_status {
 #
 
 function command_build {
-  if [ -z "${1}" ]
-  then
-    warning \
-      "Please specify a template name or names to be builded" \
-      "Usage: ${my_name} ${command_name} [OPTIONS] <build_name> [<build_name>] ..." \
-      "   or: ${my_name} ${command_name} [OPTIONS] all" \
-      "" \
-      "Options: -f  Force rebuild the already builded templates" \
-      "" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  elif [ "${1}" = "description" ]
+  if [ "${1}" = "description" ]
   then
     echo "Build the specified templates (must be run under the ROOT user)"
     return 0
+  fi
+
+  local \
+    options_supported=("-f")
+
+  if [ -z "${1}" ]
+  then
+    show_usage \
+      "Please specify a template name or names to be builded" \
+      "Usage: ${my_name} ${command_name} [OPTIONS] <build_name> [<build_name>] ..." \
+      "   or: ${my_name} ${command_name} [OPTIONS] all"
   fi
 
   if [ ! -d "${BUILD_OUTPUT_DIR}" ]
@@ -809,7 +832,7 @@ function command_build {
     image_path+="-${image_version}.iso"
     echo "The resulted ISO-image will be '${image_path}'"
 
-    if [ "${my_flags[force]}" != "yes" \
+    if [ "${my_options[-f]}" != "yes" \
          -a -f "${image_path}" ]
     then
       skipping \

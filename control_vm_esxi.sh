@@ -36,10 +36,11 @@ my_dir="${0%/*}"
 #
 declare -A \
   my_all_params=() \
-  my_esxi_autostart_params=() \
-  my_flags=() \
   my_config_esxi_list=() \
   my_config_vm_list=() \
+  my_esxi_autostart_params=() \
+  my_options=() \
+  my_options_map=() \
   my_params_map=() \
   my_real_vm_list=()
 declare \
@@ -68,7 +69,22 @@ my_all_params=(
   [0.vm_timezone]="Etc/UTC"
   [0.vm_vcpus]="1"
 )
-
+# The list with supported parameters of autostart manager on ESXi
+my_esxi_autostart_params=(
+  [enabled]=""
+  [startDelay]=""
+  [stopDelay]=""
+  [waitForHeartbeat]=""
+  [stopAction]=""
+)
+# The map with supported command line options and him descriptions
+my_options_map=(
+  [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
+  [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
+  [-i]="Do not stop the script if any of hypervisors are not available"
+  [-n]="Skip virtual machine availability check on all hypervisors"
+  [-sn]="Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)"
+)
 # The map of parameters between configuration file and esxi vmx file
 # The 'special.' prefix signals that the conversion is not direct
 my_params_map=(
@@ -84,15 +100,6 @@ my_params_map=(
   [special.vm_autostart]="vm_autostart"
   [special.vm_esxi_datastore]="vm_esxi_datastore"
   [special.local_iso_path]="local_iso_path"
-)
-
-# The list with supported parameters of autostart manager on ESXi
-my_esxi_autostart_params=(
-  [enabled]=""
-  [startDelay]=""
-  [stopDelay]=""
-  [waitForHeartbeat]=""
-  [stopAction]=""
 )
 
 set -o errexit
@@ -145,11 +152,11 @@ function check_cache_params {
 
 # The function for checking virtual machine parameters values
 #
-#  Input: ${1}           - The checked parameter name or 'all'
-#         ${my_flags[@]} - Keys - flags names, values - "yes" string
-#         ${params[@]}   - The array with parameters
-# Return: 0              - If all checks are completed
-#         1              - Otherwise
+#  Input: ${1}             - The checked parameter name or 'all'
+#         ${my_options[@]} - Keys - options names, values - "yes" string
+#         ${params[@]}     - The array with parameters
+# Return: 0                - If all checks are completed
+#         1                - Otherwise
 #
 function check_vm_params {
   local \
@@ -202,13 +209,13 @@ function check_vm_params {
       elif [     $((`ip4_addr_to_int "${params[vm_ipv4_address]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) \
              -ne $((`ip4_addr_to_int "${params[vm_ipv4_gateway]}"` & `ip4_addr_to_int "${params[vm_ipv4_netmask]}"`)) ]
       then
-        if [ "${my_flags[skip_vm_network_params_check]}" = "yes" ]
+        if [ "${my_options[-sn]}" = "yes" ]
         then
-          echo "    Skipped checking of network paramaters because '-sn' flag is specified"
+          echo "    Skipped checking of network paramaters because '-sn' option is specified"
         else
           skipping \
             "The specified gateway '${params[vm_ipv4_gateway]}' does not match the specified address '${params[vm_ipv4_address]}' and netmask '${params[vm_ipv4_netmask]}'" \
-            "Please correct address with netmask or gateway address of virtual machine or use '-sn' flag to ignore this check"
+            "Please correct address with netmask or gateway address of virtual machine or use '-sn' option to ignore this check"
           return 1
         fi
       fi
@@ -795,20 +802,20 @@ function get_real_vm_list {
       done \
       5<"${vms_map_filepath}"
     else
-      if [ "${my_flags[skip_availability_check]}" = "yes" ]
+      if [ "${my_options[-n]}" = "yes" ]
       then
         continue
       else
-        if [ "${my_flags[ignore_unavailable]}" = "yes" ]
+        if [ "${my_options[-i]}" = "yes" ]
         then
-          my_flags[unavailable_presence]="yes"
+          my_options[unavailable_presence]="yes"
           continue
         else
           warning \
             "The hypervisor '${esxi_name}' not available now," \
             "therefore, it's not possible to build a virtual machines map on all hypervisors" \
             "" \
-            "Add '-i' key if you can ignore unavailable hypervisors"
+            "Add '-i' option if you can ignore unavailable hypervisors"
         fi
       fi
     fi
@@ -1099,6 +1106,11 @@ function parse_ini_file {
         error_config \
           "Wrong name '${config_resource_name}' for INI-resource, must consist of characters (in regex notation): [[:alnum:]_.-]" \
           "Please correct the name and try again"
+      elif [[ "${config_resource_name}" =~ ^- ]]
+      then
+        error_config \
+          "The INI-resource must not start with a '-' character as it is used to specify options" \
+          "Please correct the name and try again"
       else
         let my_all_params_count+=1
         case "${section_name}"
@@ -1290,15 +1302,17 @@ function parse_ini_file {
 
 # Function for parsing the list of command line arguments specified at the input
 # and preparing 3 arrays with identifiers of encountered hypervisors and virtual machines,
-# and 1 array with flags for script operation controls
+# and 1 array with options for script operation controls
 #
-#  Input: ${@}                   - List of flags, virtual machines names or hypervisors names
-# Modify: ${my_flags[@]}         - Keys - flags names, values - "yes" string
-#         ${esxi_ids[@]}         - Keys - identifiers of hypervisors, values - empty string
-#         ${esxi_ids_ordered[@]} - Values - identifiers of hypervisors in order of their indication
-#         ${vm_ids[@]}           - Keys - identifiers of virtual machines, values - empty string
-#         ${vm_ids_ordered[@]}   - Values - identifiers of virtual machines in order of their indication
-# Return: 0                      - Always
+#  Input: ${@}                     - List of options, virtual machines names or hypervisors names
+#         ${my_options_map[@]}     - Keys - command line options, values - options names mapped to
+#         ${options_supported[@]}  - List of supported options supported by the command
+# Modify: ${my_options[@]}         - Keys - options names, values - "yes" string
+#         ${esxi_ids[@]}           - Keys - identifiers of hypervisors, values - empty string
+#         ${esxi_ids_ordered[@]}   - Values - identifiers of hypervisors in order of their indication
+#         ${vm_ids[@]}             - Keys - identifiers of virtual machines, values - empty string
+#         ${vm_ids_ordered[@]}     - Values - identifiers of virtual machines in order of their indication
+# Return: 0                        - Always
 #
 function parse_args_list {
   local \
@@ -1308,15 +1322,6 @@ function parse_args_list {
     vm_id="" \
     vm_name=""
 
-  local -A \
-    my_flags_map=(
-      [-d]="destroy_on_another"
-      [-f]="force"
-      [-i]="ignore_unavailable"
-      [-n]="skip_availability_check"
-      [-sn]="skip_vm_network_params_check"
-    )
-
   esxi_ids=()
   esxi_ids_ordered=()
   vm_ids=()
@@ -1324,10 +1329,26 @@ function parse_args_list {
 
   for arg_name in "${@}"
   do
-    if [ -v my_flags_map["${arg_name}"] ]
+    if [[ "${arg_name}" =~ ^- ]]
     then
-      my_flags[${my_flags_map[${arg_name}]}]="yes"
-      continue
+      if \
+        finded_duplicate \
+          "${arg_name}" \
+          "${options_supported[@]}"
+      then
+        if [ -v my_options_map["${arg_name}"] ]
+        then
+          my_options[${arg_name}]="yes"
+          continue
+        else
+          internal \
+            "The '${arg_name}' option specified at \${options_supported[@]} don't finded at \${my_options_map[@]} array"
+        fi
+      else
+        warning \
+          "The '${arg_name}' option is not supported by '${command_name}' command" \
+          "Please see the use of command by running: '${my_name} ${command_name}'"
+      fi
     fi
 
     for vm_id in "${!my_config_vm_list[@]}"
@@ -1708,25 +1729,22 @@ function skipping {
 #
 
 function command_create {
-  if [ -z "${1}" ]
-  then
-    warning \
-      "Please specify a virtual machine name or names to be created and runned" \
-      "You can also specify hypervisor names on which all virtual machines will be created" \
-      "" \
-      "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
-      "" \
-      "Options: -d   Destroy the same virtual machine on another hypervisor (migration analogue)" \
-      "         -f   Recreate a virtual machine on destination hypervisor if it already exists" \
-      "         -i   Do not stop the script if any of hypervisors are not available" \
-      "         -n   Skip virtual machine availability check on all hypervisors" \
-      "         -sn  Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)" \
-      "" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  elif [ "${1}" = "description" ]
+  if [ "${1}" = "description" ]
   then
     echo "Create and start virtual machine(s)"
     return 0
+  fi
+
+  local \
+    options_supported=("-d" "-f" "-i" "-n" "-sn")
+
+  if [ "${#}" -lt 1 ]
+  then
+    show_usage \
+      "Please specify a virtual machine name or names to be created and runned" \
+      "You can also specify hypervisor names on which all virtual machines will be created" \
+      "" \
+      "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..."
   fi
 
   parse_ini_file
@@ -1743,26 +1761,26 @@ function command_create {
   create_temp_dir
   check_cache_params
 
-  if [    "${my_flags[destroy_on_another]}" = "yes" \
-       -a "${my_flags[skip_availability_check]}" = "yes" ]
+  if [    "${my_options[-d]}" = "yes" \
+       -a "${my_options[-n]}" = "yes" ]
   then
     warning \
-      "Key '-d' is not compatible with key '-n'" \
+      "Key '-d' is not compatible with option '-n'" \
       "because it's necessary to search for the virtual machine being destroyed on all hypervisors, and not on specific ones"
   fi
 
-  if [ "${my_flags[skip_availability_check]}" = "yes" ]
+  if [ "${my_options[-n]}" = "yes" ]
   then
-    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
+    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
     get_real_vm_list \
       simple \
       "${!esxi_ids[@]}"
   else
-    if [ "${my_flags[destroy_on_another]}" = "yes" ]
+    if [ "${my_options[-d]}" = "yes" ]
     then
       info "Will prepare a virtual machines map on all hypervisors"
     else
-      info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
+      info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' option)"
     fi
     get_real_vm_list \
       simple \
@@ -1810,7 +1828,7 @@ function command_create {
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will ${my_flags[force]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
+    info "Will ${my_options[-f]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
 
     # Checking the hypervisor liveness
     if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
@@ -1848,23 +1866,23 @@ function command_create {
 
     # Checking existance the virtual machine on another or this hypervisors
     if [ -n "${vm_esxi_id}" \
-         -a "${my_flags[force]}" != "yes" ]
+         -a "${my_options[-f]}" != "yes" ]
     then
       skipping \
         "The virtual machine already exists on hypervisor" \
-        "To force recreate it please run the 'create' command with flag '-f'"
+        "To force recreate it please run the 'create' command with option '-f'"
       continue
-    elif [ "${my_flags[destroy_on_another]}" = "yes" ]
+    elif [ "${my_options[-d]}" = "yes" ]
     then
       if [ ${#another_esxi_names[@]} -lt 1 ]
       then
         # If a virtual machine is not found anywhere, then you do not need to destroy it
-        my_flags[destroy_on_another]=""
+        my_options[-d]=""
       elif [ "${#another_esxi_names[@]}" -gt 1 ]
       then
         skipping \
           "The virtual machine exists on more than one hypervisors" \
-          "(That using the key '-d' gives the uncertainty of which virtual machine to destroy)"
+          "(That using the option '-d' gives the uncertainty of which virtual machine to destroy)"
           "${another_esxi_names[@]/#/* }"
         continue
       fi
@@ -1874,7 +1892,7 @@ function command_create {
         "The virtual machine also exists on another hypervisor(s)" \
         "${another_esxi_names[@]/#/* }"
         "" \
-        "Please use the '-n' key to skip this check"
+        "Please use the '-n' option to skip this check"
       continue
     fi
 
@@ -1943,7 +1961,7 @@ function command_create {
 
     vm_recreated=""
     if [ -n "${vm_esxi_id}" \
-         -a "${my_flags[force]}" = "yes" ]
+         -a "${my_options[-f]}" = "yes" ]
     then
       esxi_vm_simple_command \
         "power shutdown" \
@@ -2112,7 +2130,7 @@ function command_create {
         autostart_seq
     fi
 
-    if [ "${my_flags[destroy_on_another]}" = "yes" ]
+    if [ "${my_options[-d]}" = "yes" ]
     then
       esxi_vm_simple_command \
         "power shutdown" \
@@ -2127,7 +2145,7 @@ function command_create {
         "${vm_esxi_id}" \
         "${esxi_id}"
     then
-      if [ "${my_flags[destroy_on_another]}" = "yes" ]
+      if [ "${my_options[-d]}" = "yes" ]
       then
         if ! \
           esxi_vm_simple_command \
@@ -2158,7 +2176,7 @@ function command_create {
         "No connectivity to virtual machine" \
         "Please verify that the virtual machine is up manually"
 
-      if [ "${my_flags[destroy_on_another]}" = "yes" ]
+      if [ "${my_options[-d]}" = "yes" ]
       then
         if ! \
           esxi_vm_simple_command \
@@ -2194,7 +2212,7 @@ function command_create {
     vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED/PINGED${COLOR_NORMAL}"
     let runned_vms+=1
 
-    if [ "${my_flags[destroy_on_another]}" = "yes" ]
+    if [ "${my_options[-d]}" = "yes" ]
     then
       if ! \
         esxi_vm_simple_command \
@@ -2222,7 +2240,7 @@ function command_create {
       fi
     fi
 
-    if [ "${my_flags[destroy_on_another]}" = "yes" ]
+    if [ "${my_options[-d]}" = "yes" ]
     then
       vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
@@ -2259,6 +2277,8 @@ function command_ls {
       "Please fill a configuration file and try again"
   fi
 
+  local \
+    options_supported=("-n")
   local -A \
     esxi_ids=() \
     vm_ids=()
@@ -2280,11 +2300,11 @@ function command_ls {
 
   check_dependencies
 
-  # Don't check the network availability if '-n' key is specified
-  if [ "${my_flags[skip_availability_check]}" != "yes" ]
+  # Don't check the network availability if '-n' option is specified
+  if [ "${my_options[-n]}" != "yes" ]
   then
     progress "Check network availability all hosts (ping)"
-    info "To disable an availability checking use '-n' key"
+    info "To disable an availability checking use '-n' option"
 
     local -A \
       ping_status=()
@@ -2367,22 +2387,22 @@ function command_ls {
 }
 
 function command_show {
-  if [ -z "${1}" ]
-  then
-    warning \
-      "Please specify a hypervisor name or names for which will show differences" \
-      "You can also specify virtual machines names on necessary hypervisors to translate" \
-      "" \
-      "Usage: ${my_name} ${command_name} [options] <esxi_name> [<vm_name>] [<esxi_name>] ..." \
-      "" \
-      "Options: -i  Do not stop the script if any of hypervisors are not available" \
-      "         -n  Skip virtual machine map build from all hypervisors" \
-      "" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  elif [ "${1}" = "description" ]
+  if [ "${1}" = "description" ]
   then
     echo "Show the difference between the configuration file and the real situation"
     return 0
+  fi
+
+  local \
+    options_supported=("-i" "-n")
+
+  if [ -z "${1}" ]
+  then
+    show_usage \
+      "Please specify a hypervisor name or names for which will show differences" \
+      "You can also specify virtual machines names on necessary hypervisors to translate" \
+      "" \
+      "Usage: ${my_name} ${command_name} [options] <esxi_name> [<vm_name>] [<esxi_name>] ..."
   fi
 
   parse_ini_file
@@ -2399,14 +2419,14 @@ function command_show {
   create_temp_dir
   check_cache_params
 
-  if [ "${my_flags[skip_availability_check]}" = "yes" ]
+  if [ "${my_options[-n]}" = "yes" ]
   then
-    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
+    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
     get_real_vm_list \
       full \
       "${!esxi_ids[@]}"
   else
-    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
+    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' option)"
     get_real_vm_list \
       full \
       "${!my_config_esxi_list[@]}"
@@ -2650,14 +2670,14 @@ function command_show {
 
   if [ "${displayed_alived}" = "yes" ]
   then
-    if [    "${my_flags[skip_availability_check]}" = "yes" \
-         -o "${my_flags[unavailable_presence]}" = "yes" ]
+    if [    "${my_options[-n]}" = "yes" \
+         -o "${my_options[unavailable_presence]}" = "yes" ]
     then
       attention \
         "Virtual machine map not complete because some hypervisors is unavailable or unchecked," \
         "therefore may not be accurate in the column 'Also founded on another hypervisors:'" \
         "" \
-        "For complete information, please do not use the '-n' or '-i' keys"
+        "For complete information, please do not use the '-n' or '-i' options"
     fi
   fi
 
@@ -2665,36 +2685,31 @@ function command_show {
 }
 
 function command_update {
-  local \
-    supported_update_parameters=(
-      "local_iso_path"
-    )
-
-  if [ -z "${1}" ]
+  if [ "${1}" = "description" ]
   then
-    warning \
-      "Please specify a virtual machine name or names whose settings should be updated" \
+    echo "Update virtual machine(s) parameters"
+    return 0
+  fi
+
+  local \
+    options_supported=("-i" "-n" "-sn") \
+    update_params_supported=("local_iso_path")
+
+  if [ "${#}" -lt 1 ]
+  then
+    show_usage \
+      "Please specify a parameter name and virtual machine name or names whose settings should be updated" \
       "You can also specify hypervisor names on which all virtual machines will be updated" \
       "" \
       "Usage: ${my_name} ${command_name} <parameter_name> [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
       "" \
       "Supported parameter names:" \
-      "${supported_update_parameters[@]/#/* }" \
-      "" \
-      "Options: -i   Do not stop the script if any of hypervisors are not available" \
-      "         -n   Skip virtual machine availability check on all hypervisors" \
-      "         -sn  Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)" \
-      "" \
-      "Available names can be viewed using the '${my_name} ls' command"
-  elif [ "${1}" = "description" ]
-  then
-    echo "Update virtual machine(s) parameters"
-    return 0
-  elif [[ ! " ${supported_update_parameters[@]} " =~ " ${1} " ]]
+      "${update_params_supported[@]/#/* }"
+  elif ! finded_duplicate "${1}" "${update_params_supported[@]}"
   then
     warning \
       "The '${command_name}' command only supports updating values of the following parameters:" \
-      "${supported_update_parameters[@]/#/* }" \
+      "${update_params_supported[@]/#/* }" \
       "" \
       "Please specify a correct parameter name and try again"
   fi
@@ -2717,14 +2732,14 @@ function command_update {
   create_temp_dir
   check_cache_params
 
-  if [ "${my_flags[skip_availability_check]}" = "yes" ]
+  if [ "${my_options[-n]}" = "yes" ]
   then
-    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' key)"
+    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
     get_real_vm_list \
       full \
       "${!esxi_ids[@]}"
   else
-    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' key)"
+    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' option)"
     get_real_vm_list \
       full \
       "${!my_config_esxi_list[@]}"
@@ -2811,7 +2826,7 @@ function command_update {
         "The virtual machine also exists on another hypervisor(s)" \
         "${another_esxi_names[@]/#/* }" \
         "" \
-        "Please use the '-n' key to skip this check"
+        "Please use the '-n' option to skip this check"
       continue
     fi
 
