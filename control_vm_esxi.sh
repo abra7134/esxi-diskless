@@ -145,10 +145,11 @@ function check_cache_params {
 
 # The function for checking virtual machine parameters values
 #
-#  Input: ${1}          - The checked parameter name or 'all'
-#         ${params[@]}  - The array with parameters
-# Return: 0             - If all checks are completed
-#         1             - Otherwise
+#  Input: ${1}           - The checked parameter name or 'all'
+#         ${my_flags[@]} - Keys - flags names, values - "yes" string
+#         ${params[@]}   - The array with parameters
+# Return: 0              - If all checks are completed
+#         1              - Otherwise
 #
 function check_vm_params {
   local \
@@ -598,7 +599,7 @@ function get_real_vm_list {
       "${esxi_ssh_destination[@]}" \
       "vim-cmd hostsvc/autostartmanager/get_defaults" \
       "|| Cannot get the autostart defaults settings (vim-cmd hostsvc/autostartmanager/get_defaults)" \
-    || true
+    || continue
 
     if [    -f "${autostart_defaults_map_filepath}" \
          -a -s "${autostart_defaults_map_filepath}" ]
@@ -646,7 +647,7 @@ function get_real_vm_list {
       "${esxi_ssh_destination[@]}" \
       "esxcli storage filesystem list" \
       "|| Cannot get list of storage filesystems on hypervisor (esxcli storage filesystem list)" \
-    || true
+    || continue
 
     filesystem_id=0
     filesystem_uuids=()
@@ -689,7 +690,7 @@ function get_real_vm_list {
       "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
       "vim-cmd vmsvc/getallvms" \
       "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)" \
-    || true
+    || continue
 
     if [    -f "${vms_map_filepath}" \
          -a -s "${vms_map_filepath}" ]
@@ -825,7 +826,7 @@ function get_real_vm_list {
         "${esxi_ssh_destination[@]}" \
         "vim-cmd hostsvc/autostartmanager/get_autostartseq" \
         "|| Cannot get the autostart sequence settings (vim-cmd hostsvc/autostartmanager/get_autostartseq)" \
-      || true
+      || continue
 
       if [    -f "${autostart_seq_map_filepath}" \
            -a -s "${autostart_seq_map_filepath}" ]
