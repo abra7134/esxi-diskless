@@ -470,9 +470,9 @@ function get_cachefile_path_for {
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
 #  Input: ${1}                  - The type of retrieving ('full' with vm parameters and 'simple')
-#  Input: ${CACHE_DIR}          - The directory for saving cache files
+#         ${2..}                - The list esxi'es identifiers to
+#         ${CACHE_DIR}          - The directory for saving cache files
 #         ${CACHE_VALID}        - The seconds from now time while the cache file is valid
-#         ${@}                  - The list esxi'es identifiers to
 #         ${temp_dir}           - The temporary directory to save cache files if CACHE_DIR="-"
 # Modify: ${my_all_params[@]}   - Keys - parameter name with identifier of build in next format:
 #                                 {esxi_or_vm_identifier}.{parameter_name}
@@ -1430,6 +1430,108 @@ function ping_host {
     "${1}"
 }
 
+# Function-wrapper with prepare steps for any command
+#
+#  Input: ${1}                      - The type of retrieving forwarded to 'get_real_vm_list' function
+#         ${2..}                    - The command line arguments forwarded to 'parse_args_list' function
+#         ${CACHE_DIR}              - The directory for saving cache file
+#         ${CACHE_VALID}            - The seconds amount while cache file is valid
+#         ${ESXI_CONFIG_PATH}       - The path to configuration INI-file
+#         ${MY_DEPENDENCIES[@]}     - The list with commands needed to properly run of script
+#         ${my_options_map[@]}      - Keys - command line options, values - options names mapped to
+#         ${options_supported[@]}   - List of supported options supported by the command
+# Modify: ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
+#                                     {esxi_or_vm_identifier}.{parameter_name}
+#                                     Values - value of parameter
+#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
+#                                     Values - the name of esxi
+#         ${my_config_vm_list[@]}   - Keys - identifier of virtual machine (actual sequence number)
+#                                     Values - the name of virtual machine
+#         ${my_real_vm_list[@]}     - Keys - identifier of virtual machine (actual sequence number)
+#                                     Values - the name of virtual machine
+#         ${my_options[@]}          - Keys - options names, values - "yes" string
+#         ${esxi_ids[@]}            - Keys - identifiers of hypervisors, values - empty string
+#         ${esxi_ids_ordered[@]}    - Values - identifiers of hypervisors in order of their indication
+#         ${vm_ids[@]}              - Keys - identifiers of virtual machines, values - empty string
+#         ${vm_ids_ordered[@]}      - Values - identifiers of virtual machines in order of their indication
+#         ${temp_dir}               - The created temporary directory path
+# Return: 0                         - Prepare steps successful completed
+#
+function prepare_steps {
+  check_dependencies
+  parse_ini_file
+
+  if [ ${#my_config_esxi_list[@]} -lt 1 ]
+  then
+    warning \
+      "The [esxi_list] is empty in configuration file" \
+      "Please fill a configuration file and try again"
+  elif [ ${#my_config_vm_list[@]} -lt 1 ]
+  then
+    warning \
+      "The [vm_list] is empty in configuration file" \
+      "Please fill a configuration file and try again"
+  fi
+
+  local \
+    get_type="${1}"
+
+  if [    "${get_type}" != "full" \
+       -a "${get_type}" != "simple" ]
+  then
+    internal \
+      "Only 'full' and 'simple' value supported on first parameter"
+  fi
+
+  shift
+  parse_args_list "${@}"
+
+  # And for command 'ls' parse again with all virtual machines
+  # if the previous step return the empty list
+  if [    "${command_name}" = "ls" ]
+  then
+    if [    "${#vm_ids[@]}" -lt 1 \
+         -a "${#esxi_ids[@]}" -lt 1 ]
+    then
+      parse_args_list "${my_config_esxi_list[@]}"
+    fi
+    return 0
+  fi
+
+  create_temp_dir
+  check_cache_params
+
+  if [    "${my_options[-d]}" = "yes" \
+       -a "${my_options[-n]}" = "yes" ]
+  then
+    warning \
+      "Key '-d' is not compatible with option '-n'" \
+      "because it's necessary to search for the virtual machine being destroyed on all hypervisors, and not on specific ones"
+  fi
+
+  if [ "${my_options[-n]}" = "yes" ]
+  then
+    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
+    get_real_vm_list \
+      "${get_type}" \
+      "${!esxi_ids[@]}"
+  else
+    if [ "${my_options[-d]}" = "yes" ]
+    then
+      info "Will prepare a virtual machines map on all hypervisors"
+    else
+      info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' option)"
+    fi
+    get_real_vm_list \
+      "${get_type}" \
+      "${!my_config_esxi_list[@]}"
+  fi
+
+  progress "Completed"
+
+  return 0
+}
+
 # The function for removing the cachefiles for specified esxi_id or real_vm_id
 #
 #  Input: ${1}    - The esxi_id or real_vm_id for which cachefile will be removed
@@ -1753,8 +1855,6 @@ function command_create {
       "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..."
   fi
 
-  parse_ini_file
-
   local -A \
     esxi_ids=() \
     vm_ids=()
@@ -1762,36 +1862,9 @@ function command_create {
     esxi_ids_ordered=() \
     vm_ids_ordered=()
 
-  parse_args_list "${@}"
-  check_dependencies
-  create_temp_dir
-  check_cache_params
-
-  if [    "${my_options[-d]}" = "yes" \
-       -a "${my_options[-n]}" = "yes" ]
-  then
-    warning \
-      "Key '-d' is not compatible with option '-n'" \
-      "because it's necessary to search for the virtual machine being destroyed on all hypervisors, and not on specific ones"
-  fi
-
-  if [ "${my_options[-n]}" = "yes" ]
-  then
-    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
-    get_real_vm_list \
-      simple \
-      "${!esxi_ids[@]}"
-  else
-    if [ "${my_options[-d]}" = "yes" ]
-    then
-      info "Will prepare a virtual machines map on all hypervisors"
-    else
-      info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' option)"
-    fi
-    get_real_vm_list \
-      simple \
-      "${!my_config_esxi_list[@]}"
-  fi
+  prepare_steps \
+    simple \
+    "${@}"
 
   local -A \
     another_esxi_names=() \
@@ -2274,17 +2347,9 @@ function command_ls {
     return 0
   fi
 
-  parse_ini_file
-
-  if [ ${#my_config_esxi_list[@]} -lt 1 ]
-  then
-    warning \
-      "The ESXi list is empty in configuration file" \
-      "Please fill a configuration file and try again"
-  fi
-
   local \
     options_supported=("-n")
+
   local -A \
     esxi_ids=() \
     vm_ids=()
@@ -2292,19 +2357,9 @@ function command_ls {
     esxi_ids_ordered=() \
     vm_ids_ordered=()
 
-  # Parse args list if it not empty
-  if [ "${#}" -gt 0 ]
-  then
-    parse_args_list "${@}"
-  fi
-  # And parse again with all virtual machines if the previous step return the empty list
-  if [    "${#vm_ids[@]}" -lt 1 \
-       -a "${#esxi_ids[@]}" -lt 1 ]
-  then
-    parse_args_list "${my_config_esxi_list[@]}"
-  fi
-
-  check_dependencies
+  prepare_steps \
+    simple \
+    "${@}"
 
   # Don't check the network availability if '-n' option is specified
   if [ "${my_options[-n]}" != "yes" ]
@@ -2419,8 +2474,6 @@ function command_show {
       "Usage: ${my_name} ${command_name} [options] <esxi_name> [<vm_name>] [<esxi_name>] ..."
   fi
 
-  parse_ini_file
-
   local -A \
     esxi_ids=() \
     vm_ids=()
@@ -2428,25 +2481,9 @@ function command_show {
     esxi_ids_ordered=() \
     vm_ids_ordered=()
 
-  parse_args_list "${@}"
-  check_dependencies
-  create_temp_dir
-  check_cache_params
-
-  if [ "${my_options[-n]}" = "yes" ]
-  then
-    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
-    get_real_vm_list \
-      full \
-      "${!esxi_ids[@]}"
-  else
-    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' option)"
-    get_real_vm_list \
-      full \
-      "${!my_config_esxi_list[@]}"
-  fi
-
-  progress "Completed"
+  prepare_steps \
+    full \
+    "${@}"
 
   remove_temp_dir
 
@@ -2735,8 +2772,6 @@ function command_update {
     update_parameter="${1}"
   shift
 
-  parse_ini_file
-
   local -A \
     esxi_ids=() \
     vm_ids=()
@@ -2744,25 +2779,9 @@ function command_update {
     esxi_ids_ordered=() \
     vm_ids_ordered=()
 
-  parse_args_list "${@}"
-  check_dependencies
-  create_temp_dir
-  check_cache_params
-
-  if [ "${my_options[-n]}" = "yes" ]
-  then
-    info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
-    get_real_vm_list \
-      full \
-      "${!esxi_ids[@]}"
-  else
-    info "Will prepare a virtual machines map on all hypervisors (to skip use '-n' option)"
-    get_real_vm_list \
-      full \
-      "${!my_config_esxi_list[@]}"
-  fi
-
-  progress "Completed"
+  prepare_steps \
+    full \
+    "${@}"
 
   local -A \
     another_esxi_names=() \
