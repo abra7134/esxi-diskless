@@ -264,7 +264,9 @@ function esxi_vm_simple_command {
     || return 1
 
     if ! \
-      vm_state=$(< "${vm_state_filepath}")
+      read -r \
+        vm_state \
+      <"${vm_state_filepath}"
     then
       skipping \
         "Failed to get virtual machine presence from '${vm_state_filepath}' file"
@@ -290,7 +292,9 @@ function esxi_vm_simple_command {
       || return 1
 
       if ! \
-        vm_state=$(< "${vm_state_filepath}")
+        read -r \
+          vm_state \
+        <"${vm_state_filepath}"
       then
         skipping \
           "Failed to get virtual machine power status from '${vm_state_filepath}' file"
@@ -2170,7 +2174,9 @@ function command_create {
       vms
 
     if ! \
-      vm_esxi_id=$(< "${vm_id_filepath}")
+      read -r \
+        vm_esxi_id \
+      <"${vm_id_filepath}"
     then
       skipping \
         "Failed to get virtual machine identifier from '${vm_id_filepath}' file"
