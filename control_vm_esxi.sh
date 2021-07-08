@@ -246,18 +246,18 @@ function esxi_vm_simple_command {
 
   # Function to get virtual machine status
   #
-  # Input:  ${esxi_ssh_destination[@]}  - Values - connection parameters to esxi
-  #         ${esxi_name}                - The name of esxi instance
-  #         ${vm_esxi_id}               - The virtual machine indentifier on esxi instance
-  #         ${vm_state_filepath}        - The path to temporary state file
-  # Modify: ${vm_state}                 - The state of virtual machine ('Present', 'Absent', 'Powered on', 'Powered off')
-  # Return: 0                           - If virtual machine status is getted successfully
-  #         another                     - In other cases
+  # Input:  ${esxi_id}           - The identifier of hypervisor
+  #         ${esxi_name}         - The name of esxi instance
+  #         ${vm_esxi_id}        - The virtual machine indentifier on esxi instance
+  #         ${vm_state_filepath} - The path to temporary state file
+  # Modify: ${vm_state}          - The state of virtual machine ('Present', 'Absent', 'Powered on', 'Powered off')
+  # Return: 0                    - If virtual machine status is getted successfully
+  #         another              - In other cases
   function esxi_get_vm_state {
-    run_remote_command \
+    run_on_hypervisor \
     >"${vm_state_filepath}" \
+      "${esxi_id}" \
       "ssh" \
-      "${esxi_ssh_destination[@]}" \
       "set -o pipefail" \
       "vim-cmd vmsvc/getallvms | awk 'BEGIN { state=\"Absent\"; } \$1 == \"${vm_esxi_id}\" { state=\"Present\"; } END { print state; }'" \
       "|| Failed to get virtual machine presence on '${esxi_name}' hypervisor (vim-cmd vmsvc/getallvms)" \
@@ -282,10 +282,10 @@ function esxi_vm_simple_command {
 
     if [ "${vm_state}" = "Present" ]
     then
-      run_remote_command \
+      run_on_hypervisor \
       >"${vm_state_filepath}" \
+        "${esxi_id}" \
         "ssh" \
-        "${esxi_ssh_destination[@]}" \
         "set -o pipefail" \
         "vim-cmd vmsvc/power.getstate \"${vm_esxi_id}\" | awk 'NR == 2 { print \$0; }'" \
         "|| Failed to get virtual machine power status on '${esxi_name}' hypervisor (vim-cmd vmsvc/power.getstatus)" \
@@ -332,17 +332,10 @@ function esxi_vm_simple_command {
 
   local \
     esxi_name="" \
-    esxi_ssh_destination=() \
     vm_state_filepath="${temp_dir}/vm_state" \
     vm_state=""
 
   esxi_name="${my_config_esxi_list[${esxi_id}]}"
-  esxi_ssh_destination=(
-    "${my_all_params[${esxi_id}.esxi_ssh_username]}"
-    "${my_all_params[${esxi_id}.esxi_ssh_password]}"
-    "${my_all_params[${esxi_id}.esxi_hostname]}"
-    "${my_all_params[${esxi_id}.esxi_ssh_port]}"
-  )
 
   progress "${esxi_vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})"
 
@@ -373,9 +366,9 @@ function esxi_vm_simple_command {
     return 0
   fi
 
-  run_remote_command \
+  run_on_hypervisor \
+    "${esxi_id}" \
     "ssh" \
-    "${esxi_ssh_destination[@]}" \
     "vim-cmd vmsvc/${esxi_vm_operation// /.} \"${vm_esxi_id}\" >/dev/null" \
     "|| Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})" \
   || return 1
@@ -493,10 +486,10 @@ function get_real_vm_list {
   # The fucntion to update or not the cache file
   #
   #  Input:  ${1}           - The path to cache file
-  #          others         - The same as for 'run_remote_command' parameters
+  #          others         - The same as for 'run_on_hypervisor' parameters
   #          ${CACHE_VALID} - The time in seconds while a cache file is valid
   #  Return: 0              - If remote command is runned without errors
-  #          1              - Failed from 'run_remote_command' function
+  #          1              - Failed from 'run_on_hypervisor' function
   #
   function update_cachefile {
     local \
@@ -549,7 +542,7 @@ function get_real_vm_list {
           "Please check file permissions or just remove this file and try again"
       fi
 
-      run_remote_command \
+      run_on_hypervisor \
       >"${cachefile_path}" \
         "${@}" \
       || return 1
@@ -571,7 +564,6 @@ function get_real_vm_list {
     autostart_param_value="" \
     esxi_id="" \
     esxi_name="" \
-    esxi_ssh_destination=() \
     filesystem_id=0 \
     filesystem_name="" \
     filesystem_uuid="" \
@@ -592,15 +584,8 @@ function get_real_vm_list {
   for esxi_id in "${@}"
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
-    progress "Get a list of all registered VMs on the '${esxi_name}' hypervisor (vim-cmd and esxcli)"
 
-    get_params "${esxi_id}"
-    esxi_ssh_destination=(
-      "${params[esxi_ssh_username]}"
-      "${params[esxi_ssh_password]}"
-      "${params[esxi_hostname]}"
-      "${params[esxi_ssh_port]}"
-    )
+    progress "Prepare a virtual machines map/autostart settings/filesystem storage on the '${esxi_name}' hypervisor"
 
     autostart_defaults_map_filepath=$(
       get_cachefile_path_for \
@@ -609,8 +594,8 @@ function get_real_vm_list {
     )
     update_cachefile \
       "${autostart_defaults_map_filepath}" \
+      "${esxi_id}" \
       "ssh" \
-      "${esxi_ssh_destination[@]}" \
       "vim-cmd hostsvc/autostartmanager/get_defaults" \
       "|| Cannot get the autostart defaults settings (vim-cmd hostsvc/autostartmanager/get_defaults)" \
     || continue
@@ -657,8 +642,8 @@ function get_real_vm_list {
     )
     update_cachefile \
       "${filesystems_map_filepath}" \
+      "${esxi_id}" \
       "ssh" \
-      "${esxi_ssh_destination[@]}" \
       "esxcli storage filesystem list" \
       "|| Cannot get list of storage filesystems on hypervisor (esxcli storage filesystem list)" \
     || continue
@@ -698,8 +683,8 @@ function get_real_vm_list {
     )
     update_cachefile \
       "${vms_map_filepath}" \
+      "${esxi_id}" \
       "ssh" \
-      "${esxi_ssh_destination[@]}" \
       "type -f awk cat mkdir vim-cmd >/dev/null" \
       "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
       "vim-cmd vmsvc/getallvms" \
@@ -709,7 +694,6 @@ function get_real_vm_list {
     if [    -f "${vms_map_filepath}" \
          -a -s "${vms_map_filepath}" ]
     then
-      my_all_params[${esxi_id}.alive]="yes"
       vmx_failed=""
 
       while \
@@ -748,8 +732,8 @@ function get_real_vm_list {
           if ! \
             update_cachefile \
               "${vmx_filepath}" \
+              "${esxi_id}" \
               "ssh" \
-              "${esxi_ssh_destination[@]}" \
               "cat \"${vm_vmx_filepath}\"" \
               "|| Cannot get the VMX file content (cat)"
           then
@@ -836,8 +820,8 @@ function get_real_vm_list {
       )
       update_cachefile \
         "${autostart_seq_map_filepath}" \
+        "${esxi_id}" \
         "ssh" \
-        "${esxi_ssh_destination[@]}" \
         "vim-cmd hostsvc/autostartmanager/get_autostartseq" \
         "|| Cannot get the autostart sequence settings (vim-cmd hostsvc/autostartmanager/get_autostartseq)" \
       || continue
@@ -1619,54 +1603,59 @@ function run_hook {
   return 0
 }
 
-# Function to run remote command through SSH-connection
+# Function to run remote command on hypervisor through SSH-connection
 #
-# Input:  ${1} - The command 'ssh' or 'scp'
-#         ${2} - The username to establish the SSH-connection
-#         ${3} - The password to establish the SSH-connection
-#         ${4} - The hostname for SSH-connection to
-#         ${5} - The port for SSH-connection to
-#         ${@} - List of commands to run on the remote host
-#                and error descriptions (prefixed with ||) to display if they occur
-# Output:      - The stdout from remote command
-# Return: 0    - If it's alright
-#         1    - In other cases
+#  Input: ${1}           - The esxi identifier to run command on
+#         ${2}           - The command 'ssh' or 'scp'
+#         ${@}           - List of commands to run on the hypervisor
+#                          and error descriptions (prefixed with ||) to display if they occur
+# Modify: ${vm_ids[@]}   - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
+#         ${esxi_ids[@]} - Keys - identifiers of hypervisors, values - 'SKIPPING' messages
+# Output:                - The stdout from remote command
+# Return: 0              - If it's alright
+#         1              - In other cases
 #
-function run_remote_command {
+function run_on_hypervisor {
   local \
-    sshpass_command="${1}" \
-    ssh_username="${2}" \
-    ssh_password="${3}" \
-    ssh_hostname="${4}" \
-    ssh_port="${5}"
-  shift 5
+    esxi_id="${1}" \
+    sshpass_command="${2}"
+  shift 2
 
+  local -A \
+    params=()
   local \
-    error_code_index=99 \
+    error_codes_descriptions=() \
+    error_code_index="" \
+    error_description=() \
     remote_command="" \
     s="" \
-    ssh_params=(
-      "-o Port=${ssh_port}"
-      "-o User=${ssh_username}"
-    )
+    ssh_params=()
+
+  get_params "${esxi_id}"
 
   # Default error code descriptions from sshpass manual page
-  local \
-    error_codes_descriptions=(
-      [1]="Invalid command line argument for 'sshpass' command"
-      [2]="Conflicting arguments given in 'sshpass' command"
-      [3]="General runtime error of 'sshpass' command"
-      [4]="Unrecognized response from ssh (parse error)"
-      [5]="Invalid/incorrect ssh password"
-      [6]="Host public key is unknown. sshpass exits without confirming the new key"
-      [255]="Unable to establish SSH-connection"
-    ) \
-    error_description=()
+  error_codes_descriptions=(
+    [1]="Invalid command line argument for 'sshpass' command"
+    [2]="Conflicting arguments given in 'sshpass' command"
+    [3]="General runtime error of 'sshpass' command"
+    [4]="Unrecognized response from ssh (parse error)"
+    [5]="Invalid/incorrect ssh password"
+    [6]="Host public key is unknown. sshpass exits without confirming the new key"
+    [255]="Unable to establish SSH-connection"
+  )
+  error_description=()
+  # Use first free index from ${error_codes_descriptions[@]}
+  error_code_index=9
+  # Predefine ssh parameters with port and username
+  ssh_params=(
+    "-o Port=${params[esxi_ssh_port]}"
+    "-o User=${params[esxi_ssh_username]}"
+  )
 
   if [ "${sshpass_command}" = "ssh" ]
   then
     ssh_params+=(
-      "${ssh_hostname}"
+      "${params[esxi_hostname]}"
     )
     # Prepare the remote run command and errors descriptions for future processing
     for s in "${@}"
@@ -1699,7 +1688,7 @@ function run_remote_command {
   then
     ssh_params+=(
       "${1}"
-      "${ssh_hostname}:${2}"
+      "${params[esxi_hostname]}:${2}"
     )
     # Overwrite the standard description for scp command
     error_codes_descriptions[1]="Failed to copy file to remote server"
@@ -1710,7 +1699,7 @@ function run_remote_command {
 
   if \
     sshpass \
-      -p "${ssh_password}" \
+      -p "${params[esxi_ssh_password]}" \
       "${sshpass_command}" \
       -o ConnectionAttempts=1 \
       -o ConnectTimeout=10 \
@@ -1810,11 +1799,14 @@ function show_remove_failed_cachefiles {
 }
 
 # Function to print 'SKIPPING' message
-# and writing the 'SKIPPING' message in vm_ids[@] array
+# and writing the 'SKIPPING' message in vm_ids[@] array or esxi_ids[@] array
 #
-#  Input: ${@}         - The message to print
-# Modify: ${vm_ids[@]} - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
-# Return: 0            - Always
+#  Input: ${@}           - The message to print
+#         ${vm_id}       - The virtual machine identifier
+#         ${esxi_id}     - The hypervisor identifier
+# Modify: ${vm_ids[@]}   - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
+#         ${esxi_ids[@]} - Keys - identifiers of hypervisors, values - 'SKIPPING' messages
+# Return: 0              - Always
 #
 function skipping {
   if [ -n "${1}" ]
@@ -1823,14 +1815,18 @@ function skipping {
       skipping \
       "${@}" \
     >&2
+  fi
 
-    if [ ${#vm_ids[@]} -gt 0 ]
-    then
-      if [ -v vm_ids[${vm_id}] ]
-      then
-        vm_ids[${vm_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
-      fi
-    fi
+  if [    ${#vm_ids[@]} -gt 0 \
+       -a -n "${vm_id}" \
+       -a -v vm_ids[${vm_id}] ]
+  then
+    vm_ids[${vm_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL}${1:+ (${1})}"
+  elif [    ${#esxi_ids[@]} -gt 0 \
+         -a -n "${esxi_id}" \
+         -a -v esxi_ids[${esxi_id}] ]
+  then
+    esxi_ids[${esxi_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL}${1:+ (${1})}"
   fi
 
   return 0
@@ -1887,7 +1883,6 @@ function command_create {
     esxi_iso_dir="" \
     esxi_iso_path="" \
     esxi_name="" \
-    esxi_ssh_destination=() \
     param="" \
     real_vm_id="" \
     temp_file="" \
@@ -1909,17 +1904,16 @@ function command_create {
     esxi_id="${my_all_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
+    # Checking the hypervisor liveness
+    if [ -n "${esxi_ids[${esxi_id}]}" ]
+    then
+      vm_ids[${vm_id}]="${esxi_ids[${esxi_id}]/(/(Hypervisor: }"
+      continue
+    fi
+
     get_params "${vm_id}|${esxi_id}"
 
     info "Will ${my_options[-f]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
-
-    # Checking the hypervisor liveness
-    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
-    then
-      skipping \
-        "No connectivity to hypervisor (see virtual machine list preparation stage for details)"
-      continue
-    fi
 
     vm_esxi_id=""
     another_esxi_names=()
@@ -2001,42 +1995,35 @@ function command_create {
         if [ ! -v params[esxi_autostart_${autostart_param,,}] ]
         then
           skipping \
-            "Cannot get autostart manager default setting '${autostart_param}' from hypervisor" \
-            "Let a maintainer know or solve the problem yourself"
+            "Cannot get autostart manager default setting '${autostart_param}' from hypervisor"
           continue 2
         fi
       done
     fi
 
-    esxi_ssh_destination=(
-      "${params[esxi_ssh_username]}"
-      "${params[esxi_ssh_password]}"
-      "${params[esxi_hostname]}"
-      "${params[esxi_ssh_port]}"
-    )
     vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
     vm_iso_filename="${params[local_iso_path]##*/}"
     esxi_iso_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso"
     esxi_iso_path="${esxi_iso_dir}/${vm_iso_filename}"
 
     progress "Checking existance the ISO image file on '${esxi_name}' hypervisor (test -f)"
-    run_remote_command \
+    run_on_hypervisor \
+      "${esxi_id}" \
       "ssh" \
-      "${esxi_ssh_destination[@]}" \
       "mkdir -p \"${esxi_iso_dir}\"" \
       "|| Failed to create directory for storing ISO files on hypervisor" \
     || continue
 
     if ! \
-      run_remote_command \
+      run_on_hypervisor \
+        "${esxi_id}" \
         "ssh" \
-        "${esxi_ssh_destination[@]}" \
         "test -f \"${esxi_iso_path}\""
     then
       progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
-      run_remote_command \
+      run_on_hypervisor \
+        "${esxi_id}" \
         "scp" \
-        "${esxi_ssh_destination[@]}" \
         "${params[local_iso_path]}" \
         "${esxi_iso_path}" \
       || continue
@@ -2143,27 +2130,27 @@ function command_create {
     > "${vmx_filepath}"
 
     progress "Upload a virtual machine configuration to '${esxi_name}' hypervisor (scp)"
-    run_remote_command \
+    run_on_hypervisor \
+      "${esxi_id}" \
       "ssh" \
-      "${esxi_ssh_destination[@]}" \
       "! test -d \"${vm_esxi_dir}\"" \
       "|| The directory '${vm_esxi_dir}' is already exist on hypervisor" \
       "|| Please remove it manually and try again" \
       "mkdir \"${vm_esxi_dir}\"" \
       "|| Failed to create a directory '${vm_esxi_dir}' on hypervisor" \
     || continue
-    run_remote_command \
+    run_on_hypervisor \
+      "${esxi_id}" \
       "scp" \
-      "${esxi_ssh_destination[@]}" \
       "${vmx_filepath}" \
       "${vm_esxi_dir}/${vm_name}.vmx" \
     || continue
 
     progress "Register the virtual machine configuration on '${esxi_name}' hypervisor (vim-cmd solo/registervm)"
-    run_remote_command \
+    run_on_hypervisor \
     >"${vm_id_filepath}" \
+      "${esxi_id}" \
       "ssh" \
-      "${esxi_ssh_destination[@]}" \
       "vim-cmd solo/registervm \"${vm_esxi_dir}/${vm_name}.vmx\" \"${vm_name}\"" \
       "|| Failed to register a virtual machine on hypervisor" \
     || continue
@@ -2202,9 +2189,9 @@ function command_create {
         fi
       done
 
-      run_remote_command \
+      run_on_hypervisor \
+        "${esxi_id}" \
         "ssh" \
-        "${esxi_ssh_destination[@]}" \
         "vim-cmd hostsvc/autostartmanager/update_autostartentry ${vm_esxi_id} powerOn ${params[esxi_autostart_startdelay]} 1 systemDefault ${params[esxi_autostart_stopdelay]} systemDefault >/dev/null" \
         "|| Failed to update the autostart settings on hypervisor" \
       || continue
@@ -2534,7 +2521,7 @@ function command_show {
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
-    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
+    if [ -n "${esxi_ids[${esxi_id}]}" ]
     then
       color_alive="${COLOR_RED}"
     else
@@ -2548,10 +2535,10 @@ function command_show {
       "$(print_param esxi_hostname ${esxi_id})" \
       "$(print_param esxi_ssh_port ${esxi_id})"
 
-    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
+    if [ -n "${esxi_ids[${esxi_id}]}" ]
     then
       echo
-      echo "  No connectivity to hypervisor (see details above)"
+      echo -e "  ${esxi_ids[${esxi_id}]}"
       echo
       continue
     fi
@@ -2802,7 +2789,6 @@ function command_update {
     esxi_iso_dir="" \
     esxi_iso_path="" \
     esxi_name="" \
-    esxi_ssh_destination=() \
     real_vm_id="" \
     vm_esxi_dir="" \
     vm_esxi_id="" \
@@ -2818,17 +2804,16 @@ function command_update {
     esxi_id="${my_all_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
+    # Checking the hypervisor liveness
+    if [ -n "${esxi_ids[${esxi_id}]}" ]
+    then
+      vm_ids[${vm_id}]="${esxi_ids[${esxi_id}]/(/(Hypervisor: }"
+      continue
+    fi
+
     get_params "${vm_id}|${esxi_id}"
 
     info "Will update a '${update_parameter}' parameter at '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]})"
-
-    # Checking the hypervisor liveness
-    if [ "${my_all_params[${esxi_id}.alive]}" != "yes" ]
-    then
-      skipping \
-        "No connectivity to hypervisor (see virtual machine list preparation stage for details)"
-      continue
-    fi
 
     vm_esxi_id=""
     another_esxi_names=()
@@ -2888,35 +2873,28 @@ function command_update {
       continue
     fi
 
-    esxi_ssh_destination=(
-      "${params[esxi_ssh_username]}"
-      "${params[esxi_ssh_password]}"
-      "${params[esxi_hostname]}"
-      "${params[esxi_ssh_port]}"
-    )
     vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
     vm_iso_filename="${params[local_iso_path]##*/}"
     esxi_iso_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso"
     esxi_iso_path="${esxi_iso_dir}/${vm_iso_filename}"
 
     progress "Checking existance the ISO image file on '${esxi_name}' hypervisor (test -f)"
-    run_remote_command \
-      "ssh" \
-      "${esxi_ssh_destination[@]}" \
-      "mkdir -p \"${esxi_iso_dir}\"" \
-      "|| Failed to create directory for storing ISO files on hypervisor" \
-    || continue
-
     if ! \
-      run_remote_command \
+      run_on_hypervisor \
+        "${esxi_id}" \
         "ssh" \
-        "${esxi_ssh_destination[@]}" \
         "test -f \"${esxi_iso_path}\""
     then
       progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
-      run_remote_command \
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "ssh" \
+        "mkdir -p \"${esxi_iso_dir}\"" \
+        "|| Failed to create directory for storing ISO files on hypervisor" \
+      || continue
+      run_on_hypervisor \
+        "${esxi_id}" \
         "scp" \
-        "${esxi_ssh_destination[@]}" \
         "${params[local_iso_path]}" \
         "${esxi_iso_path}" \
       || continue
