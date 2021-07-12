@@ -3,7 +3,7 @@
 # Script for building ISO-images
 # (c) 2021 Maksim Lekomtsev <lekomtsev@unix-mastery.ru>
 
-MY_DEPENDENCIES=("cat" "cp" "find" "git" "mkisofs" "sha1sum")
+MY_DEPENDENCIES=("cat" "cp" "find" "git" "mkisofs")
 MY_NAME="Script for building ISO-images from templates"
 MY_VARIABLES=("BUILD_CONFIG_PATH" "BUILD_OUTPUT_DIR")
 MY_VERSION="2.210616"
@@ -238,34 +238,6 @@ function get_base_layer_tar_path {
   done
 
   return 1
-}
-
-# The function to calculate 'sha1' hash sum of file or string
-#
-#  Input: ${1}       - The name of file or string for which hash sum is calculated
-# Output: hash sum   - In short format (only 8 first symbols)
-# Return: 0          - Calculate is success
-#         1          - Otherwise
-#
-function get_hash {
-  local \
-    hash=""
-
-  if [ -f "${1}" ]
-  then
-    hash=$(
-      sha1sum <"${1}"
-    ) \
-    || return 1
-  else
-    hash=$(
-      sha1sum <<<"${1}"
-    ) \
-    || return 1
-  fi
-
-  echo "${hash:0:8}"
-  return 0
 }
 
 # Function to print 'SKIPPING' message

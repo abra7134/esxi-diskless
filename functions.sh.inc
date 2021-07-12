@@ -1,7 +1,7 @@
 let _progress_number=1
 
 # Added dependencies from this include file
-MY_DEPENDENCIES+=("tty")
+MY_DEPENDENCIES+=("mktemp" "rm" "sha1sum" "tty")
 
 # Function to print certain type of messages
 #
@@ -305,6 +305,34 @@ function finded_duplicate {
   return 1
 }
 
+# The function to calculate 'sha1' hash sum of file or string
+#
+#  Input: ${1}       - The name of file or string for which hash sum is calculated
+# Output: hash sum   - In short format (only 8 first symbols)
+# Return: 0          - Calculate is success
+#         1          - Otherwise
+#
+function get_hash {
+  local \
+    hash=""
+
+  if [ -f "${1}" ]
+  then
+    hash=$(
+      sha1sum <"${1}"
+    ) \
+    || return 1
+  else
+    hash=$(
+      sha1sum <<<"${1}"
+    ) \
+    || return 1
+  fi
+
+  echo "${hash:0:8}"
+  return 0
+}
+
 # Function for getting the needed VM or ESXi parameters
 #
 #  Input: ${1}         - The identifier of virtual machine or esxi on regex notation
@@ -491,6 +519,9 @@ function show_usage {
         "${option_message}"
       )
       first_line=""
+    else
+      internal \
+        "The '${option}' option specified at \${options_supported[@]} don't exists in \${my_options_map[@]} array"
     fi
   done
 
