@@ -1242,7 +1242,7 @@ function parse_ini_file {
           then
             error \
               "Problem in configuration file:" \
-              "The empty value of required '${config_parameter}' parameter at '${my_config_esxi_list[${esxi_id}]}' esxi instance definition" \
+              "Is absent the required '${config_parameter}' parameter at '${my_config_esxi_list[${esxi_id}]}' esxi instance definition" \
               "Please fill the value of parameter and try again"
           fi
 
@@ -1278,7 +1278,7 @@ function parse_ini_file {
           then
             error \
               "Problem in configuration file:" \
-              "The empty value of required '${config_parameter}' parameter at '${my_config_vm_list[$vm_id]}' virtual machine definition" \
+              "Is absent the required '${config_parameter}' parameter at '${my_config_vm_list[$vm_id]}' virtual machine definition" \
               "Please fill the value of parameter and try again"
           fi
 
