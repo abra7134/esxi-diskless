@@ -8,16 +8,29 @@ MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("CACHE_DIR" "CACHE_VALID" "ESXI_CONFIG_PATH")
 MY_VERSION="2.210623"
 
+# The directory for saving cache files
 CACHE_DIR="${CACHE_DIR:-"${0%/*}/.cache"}"
+# The seconds mount while cache files are valid
 CACHE_VALID="${CACHE_VALID:-3600}" # 1 hour
+# The configuration file path
 ESXI_CONFIG_PATH="${ESXI_CONFIG_PATH:-"${0%.sh}.ini"}"
 
 my_name="${0}"
 my_dir="${0%/*}"
 
-# my_all_params - associative array with all params from configuration file
-#                 the first number of the index name is the resource number, the digit "0" is reserved for default settings
-#                 other resource numbers will be referenced in my_*_esxi_list and my_*_vm_list associative arrays
+# ${my_all_params[@]}       - Associative array with all parameters from configuration file
+#                             Key - ${id}.${name}
+#                                   ${id} - the resource identifier, the digit "0" is reserved for default settings
+#                                           other resource numbers will be referenced in my_*_list associative arrays
+#                                   ${name} - the parameter name
+# ${my_all_params_count}    - The identifier of last recorded resource
+# ${my_config_esxi_list[@]} - List of esxi hypervisors filled from configuration file
+#                             Key - the hypervisor identifier, value - the hypervisor name
+# ${my_config_vm_list[@]}   - List of virtual machines filled from configuration file
+#                             Key - the virtual machine identifier, value - the virtual machine name
+# ${my_real_vm_list[@]}     - List of real virtual machines filled from hypervisors
+#                             Key - the real virtual machine identifier, value - the virtual machine name
+#
 # for example:
 #
 # my_all_params=(
@@ -26,6 +39,7 @@ my_dir="${0%/*}"
 #   [0.vm_ipv4_address]="7.7.7.7"
 #   [1.esxi_hostname]="esxi1.local"
 #   [2.vm_ipv4_address]="192.168.0.1"
+#   [3.vm_esxi_datastore]="hdd1"
 # )
 # my_config_esxi_list=(
 #   [1]="esxi.test"
@@ -33,77 +47,87 @@ my_dir="${0%/*}"
 # my_config_vm_list=(
 #   [2]="vm.test.local"
 # )
+# my_real_vm_list=(
+#   [3]="vm3"
+# )
 #
-declare -A \
-  my_all_params=() \
-  my_config_esxi_list=() \
-  my_config_vm_list=() \
-  my_esxi_autostart_params=() \
-  my_options=() \
-  my_options_map=() \
-  my_params_map=() \
-  my_real_vm_list=() \
-  my_uploaded_iso_list=()
 declare \
   my_all_params_count=0
+declare -A \
+  my_all_params=(
+    [0.esxi_hostname]="REQUIRED"
+    [0.esxi_ssh_password]=""
+    [0.esxi_ssh_port]="22"
+    [0.esxi_ssh_username]="root"
+    [0.local_hook_path]=""
+    [0.local_iso_path]="REQUIRED"
+    [0.vm_autostart]="no"
+    [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
+    [0.vm_esxi_datastore]="datastore1"
+    [0.vm_guest_type]="debian8-64"
+    [0.vm_ipv4_address]="REQUIRED"
+    [0.vm_ipv4_netmask]="255.255.255.0"
+    [0.vm_ipv4_gateway]="REQUIRED"
+    [0.vm_memory_mb]="1024"
+    [0.vm_network_name]="VM Network"
+    [0.vm_ssh_password]=""
+    [0.vm_ssh_port]="22"
+    [0.vm_ssh_username]="root"
+    [0.vm_timezone]="Etc/UTC"
+    [0.vm_vcpus]="1"
+  ) \
+  my_config_esxi_list=() \
+  my_config_vm_list=() \
+  my_real_vm_list=()
 
-# Init default values
-my_all_params=(
-  [0.esxi_hostname]="REQUIRED"
-  [0.esxi_ssh_password]=""
-  [0.esxi_ssh_port]="22"
-  [0.esxi_ssh_username]="root"
-  [0.local_hook_path]=""
-  [0.local_iso_path]="REQUIRED"
-  [0.vm_autostart]="no"
-  [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
-  [0.vm_esxi_datastore]="datastore1"
-  [0.vm_guest_type]="debian8-64"
-  [0.vm_ipv4_address]="REQUIRED"
-  [0.vm_ipv4_netmask]="255.255.255.0"
-  [0.vm_ipv4_gateway]="REQUIRED"
-  [0.vm_memory_mb]="1024"
-  [0.vm_network_name]="VM Network"
-  [0.vm_ssh_password]=""
-  [0.vm_ssh_port]="22"
-  [0.vm_ssh_username]="root"
-  [0.vm_timezone]="Etc/UTC"
-  [0.vm_vcpus]="1"
-)
-# The list with supported parameters of autostart manager on ESXi
-my_esxi_autostart_params=(
-  [enabled]=""
-  [startDelay]=""
-  [stopDelay]=""
-  [waitForHeartbeat]=""
-  [stopAction]=""
-)
-# The map with supported command line options and him descriptions
-my_options_map=(
-  [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
-  [-dt]="Don't trust the .sha1 files (calculate checksums again and compare with .sha1 files)"
-  [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
-  [-ff]="Force check checksums for existed ISO-images on hypervisor"
-  [-i]="Do not stop the script if any of hypervisors are not available"
-  [-n]="Skip virtual machine availability check on all hypervisors"
-  [-sn]="Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)"
-)
-# The map of parameters between configuration file and esxi vmx file
-# The 'special.' prefix signals that the conversion is not direct
-my_params_map=(
-  [ethernet0.networkname]="vm_network_name"
-  [guestinfo.dns_servers]="vm_dns_servers"
-  [guestinfo.ipv4_address]="vm_ipv4_address"
-  [guestinfo.ipv4_netmask]="vm_ipv4_netmask"
-  [guestinfo.ipv4_gateway]="vm_ipv4_gateway"
-  [guestinfo.timezone]="vm_timezone"
-  [guestos]="vm_guest_type"
-  [memsize]="vm_memory_mb"
-  [numvcpus]="vm_vcpus"
-  [special.vm_autostart]="vm_autostart"
-  [special.vm_esxi_datastore]="vm_esxi_datastore"
-  [special.local_iso_path]="local_iso_path"
-)
+# ${my_options[@]}     - Array with options which were specified on the command line
+#                        Key - the command line option name, Value - "yes" string
+# ${my_options_map[@]} - Array with all supported command line options and them descriptions
+#                        Key - the command line option name, Value - the option description
+declare -A \
+  my_options=() \
+  my_options_map=(
+    [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
+    [-dt]="Don't trust the .sha1 files (calculate checksums again and compare with .sha1 files)"
+    [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
+    [-ff]="Force check checksums for existed ISO-images on hypervisor"
+    [-i]="Do not stop the script if any of hypervisors are not available"
+    [-n]="Skip virtual machine availability check on all hypervisors"
+    [-sn]="Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)"
+  )
+
+# ${my_esxi_autostart_params[@]} - The list with supported parameters of autostart manager on ESXi
+#                                  Key - the paramter name, Value - empty
+# ${my_params_map[@]}            - The map of parameters between configuration file and ESXi VMX file
+#                                  Key - the parameter name in VMX file
+#                                        The 'special.' prefix signals that the conversion is not direct
+#                                  Value - the parameter name in configuration file of this script
+declare -A \
+  my_esxi_autostart_params=(
+    [enabled]=""
+    [startDelay]=""
+    [stopDelay]=""
+    [waitForHeartbeat]=""
+    [stopAction]=""
+  ) \
+  my_params_map=(
+    [ethernet0.networkname]="vm_network_name"
+    [guestinfo.dns_servers]="vm_dns_servers"
+    [guestinfo.ipv4_address]="vm_ipv4_address"
+    [guestinfo.ipv4_netmask]="vm_ipv4_netmask"
+    [guestinfo.ipv4_gateway]="vm_ipv4_gateway"
+    [guestinfo.timezone]="vm_timezone"
+    [guestos]="vm_guest_type"
+    [memsize]="vm_memory_mb"
+    [numvcpus]="vm_vcpus"
+    [special.vm_autostart]="vm_autostart"
+    [special.vm_esxi_datastore]="vm_esxi_datastore"
+    [special.local_iso_path]="local_iso_path"
+  )
+
+declare -A \
+  my_uploaded_iso_list=()
+
 
 set -o errexit
 set -o errtrace
@@ -124,8 +148,8 @@ fi
 
 # The function to check cache parameters
 #
-#  Input: ${CACHE_DIR}   - The directory for saving cache file
-#         ${CACHE_VALID} - The seconds amount while cache file is valid
+#  Input: ${CACHE_DIR}   - GLOBAL (see description at top)
+#         ${CACHE_VALID} - GLOBAL (see description at top)
 # Return: 0              - Check is complete
 #
 function check_cache_params {
@@ -159,7 +183,7 @@ function check_cache_params {
 # The function for checking virtual machine parameters values
 #
 #  Input: ${1}             - The checked parameter name or 'all'
-#         ${my_options[@]} - Keys - options names, values - "yes" string
+#         ${my_options[@]} - GLOBAL (see description at top)
 #         ${params[@]}     - The array with parameters
 # Return: 0                - If all checks are completed
 #         1                - Otherwise
@@ -237,11 +261,8 @@ function check_vm_params {
 #         ${2}                      - The virtual machine identified on hypervisor
 #         ${3}                      - The hypervisor identifier at ${my_config_esxi_list} array
 #         ${temp_dir}               - The temporary directory to save commands outputs
-#         ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
-#                                     {esxi_or_vm_identifier}.{parameter_name}
-#                                     Values - value of parameter
-#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
-#                                     Values - the name of esxi
+#         ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
 # Return: 0                         - If simple operation is successful
 #         another                   - In other cases
 #
@@ -416,16 +437,13 @@ function esxi_vm_simple_command {
 
 # The function for retrieve the cachefile path for specified esxi_id or real_vm_id
 #
-#  Input: ${1}                      - The esxi_id or real_vm_id for which function the retrieve the actual cachefile path
+#  Input: ${1}                      - The esxi_id or real_vm_id for which function
+#                                     the retrieve the actual cachefile path
 #         ${2}                      - Type of cache if esxi_id specified in ${1}
-#         ${CACHE_DIR}              - The directory for storing cache files
-#         ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
-#                                     {esxi_or_vm_identifier}.{parameter_name}
-#                                     Values - value of parameter
-#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
-#                                     Values - the name of esxi
-#         ${my_real_vm_list[@]}     - Keys - identifier of real virtual machine (actual sequence number)
-#                                     Values - the name of real virtual machine
+#         ${CACHE_DIR}              - GLOBAL (see description at top)
+#         ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${my_real_vm_list[@]}     - GLOBAL (see description at top)
 # Output: >&1                       - The actual path to cachefile
 # Return: 0                         - The cachefile path is returned correctly
 #
@@ -469,17 +487,15 @@ function get_cachefile_path_for {
 
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
-#  Input: ${1}                  - The type of retrieving ('full' with vm parameters and 'simple')
-#         ${2..}                - The list esxi'es identifiers to
-#         ${CACHE_DIR}          - The directory for saving cache files
-#         ${CACHE_VALID}        - The seconds from now time while the cache file is valid
-#         ${temp_dir}           - The temporary directory to save cache files if CACHE_DIR="-"
-# Modify: ${my_all_params[@]}   - Keys - parameter name with identifier of build in next format:
-#                                 {esxi_or_vm_identifier}.{parameter_name}
-#                                 Values - value of parameter
-#         ${my_real_vm_list[@]} - Keys - identifier of virtual machine (actual sequence number)
-#                                 Values - the name of virtual machine
-# Return: 0                     - The retrieving information is complete successful
+#  Input: ${1}                     - The type of retrieving ('full' with vm parameters and 'simple')
+#         ${@}                     - The list esxi'es identifiers to
+#         ${temp_dir}              - The temporary directory to save cache files if CACHE_DIR="-"
+#         ${CACHE_DIR}             - GLOBAL (see description at top)
+#         ${CACHE_VALID}           - GLOBAL (see description at top)
+# Modify: ${my_all_params[@]}      - GLOBAL (see description at top)
+#         ${my_all_params_count}   - GLOBAL (see description at top)
+#         ${my_real_vm_list[@]}    - GLOBAL (see description at top)
+# Return: 0                        - The retrieving information is complete successful
 #
 function get_real_vm_list {
   local \
@@ -489,8 +505,8 @@ function get_real_vm_list {
   # The fucntion to update or not the cache file
   #
   #  Input:  ${1}           - The path to cache file
-  #          others         - The same as for 'run_on_hypervisor' parameters
-  #          ${CACHE_VALID} - The time in seconds while a cache file is valid
+  #          ${@}           - The same as for 'run_on_hypervisor' parameters
+  #          ${CACHE_VALID} - GLOBAL (see description at top)
   #  Return: 0              - If remote command is runned without errors
   #          1              - Failed from 'run_on_hypervisor' function
   #
@@ -898,14 +914,11 @@ function get_real_vm_list {
 
 # The function to parse configuration file
 #
-#  Input: ${ESXI_CONFIG_PATH}       - The path to configuration INI-file
-# Modify: ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
-#                                     {esxi_or_vm_identifier}.{parameter_name}
-#                                     Values - value of parameter
-#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
-#                                     Values - the name of esxi
-#         ${my_config_vm_list[@]}   - Keys - identifier of virtual machine (actual sequence number)
-#                                     Values - the name of virtual machine
+#  Input: ${ESXI_CONFIG_PATH}       - GLOBAL (see description at top)
+# Modify: ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_all_params_count}    - GLOBAL (see description at top)
+#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
 # Return: 0                         - The parse complete without errors
 #
 function parse_ini_file {
@@ -1216,7 +1229,7 @@ function parse_ini_file {
           "${config_value}"
         my_all_params[${my_all_params_count}.${config_parameter}]="${config_value}"
 
-        # If line ending with '\' symbol, associate the parameters from next line with current my_all_params_count
+        # If line ending with '\' symbol, associate the parameters from next line with current ${my_all_params_count}
         if [ "${config_parameters}" = "\\" ]
         then
           use_previous_resource="yes"
@@ -1301,9 +1314,9 @@ function parse_ini_file {
 # and 1 array with options for script operation controls
 #
 #  Input: ${@}                     - List of options, virtual machines names or hypervisors names
-#         ${my_options_map[@]}     - Keys - command line options, values - options names mapped to
+#         ${my_options_map[@]}     - GLOBAL (see description at top)
 #         ${options_supported[@]}  - List of supported options supported by the command
-# Modify: ${my_options[@]}         - Keys - options names, values - "yes" string
+# Modify: ${my_options[@]}         - GLOBAL (see description at top)
 #         ${esxi_ids[@]}           - Keys - identifiers of hypervisors, values - empty string
 #         ${esxi_ids_ordered[@]}   - Values - identifiers of hypervisors in order of their indication
 #         ${vm_ids[@]}             - Keys - identifiers of virtual machines, values - empty string
@@ -1426,23 +1439,18 @@ function ping_host {
 # Function-wrapper with prepare steps for any command
 #
 #  Input: ${1}                      - The type of retrieving forwarded to 'get_real_vm_list' function
-#         ${2..}                    - The command line arguments forwarded to 'parse_args_list' function
-#         ${CACHE_DIR}              - The directory for saving cache file
-#         ${CACHE_VALID}            - The seconds amount while cache file is valid
-#         ${ESXI_CONFIG_PATH}       - The path to configuration INI-file
-#         ${MY_DEPENDENCIES[@]}     - The list with commands needed to properly run of script
-#         ${my_options_map[@]}      - Keys - command line options, values - options names mapped to
+#         ${@}                      - The command line arguments forwarded to 'parse_args_list' function
+#         ${CACHE_DIR}              - GLOBAL (see description at top)
+#         ${CACHE_VALID}            - GLOBAL (see description at top)
+#         ${ESXI_CONFIG_PATH}       - GLOBAL (see description at top)
+#         ${MY_DEPENDENCIES[@]}     - GLOBAL (see description at top)
+#         ${my_options_map[@]}      - GLOBAL (see description at top)
 #         ${options_supported[@]}   - List of supported options supported by the command
-# Modify: ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
-#                                     {esxi_or_vm_identifier}.{parameter_name}
-#                                     Values - value of parameter
-#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
-#                                     Values - the name of esxi
-#         ${my_config_vm_list[@]}   - Keys - identifier of virtual machine (actual sequence number)
-#                                     Values - the name of virtual machine
-#         ${my_real_vm_list[@]}     - Keys - identifier of virtual machine (actual sequence number)
-#                                     Values - the name of virtual machine
-#         ${my_options[@]}          - Keys - options names, values - "yes" string
+# Modify: ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
+#         ${my_real_vm_list[@]}     - GLOBAL (see description at top)
+#         ${my_options[@]}          - GLOBAL (see description at top)
 #         ${esxi_ids[@]}            - Keys - identifiers of hypervisors, values - empty string
 #         ${esxi_ids_ordered[@]}    - Values - identifiers of hypervisors in order of their indication
 #         ${vm_ids[@]}              - Keys - identifiers of virtual machines, values - empty string
@@ -1530,9 +1538,9 @@ function prepare_steps {
 
 # The function for removing the cachefiles for specified esxi_id or real_vm_id
 #
-#  Input: ${1}    - The esxi_id or real_vm_id for which cachefile will be removed
-#         ${2}..  - Type of caches if esxi_id specified in ${1}
-# Return: 0       - The cachefile path is returned correctly
+#  Input: ${1} - The esxi_id or real_vm_id for which cachefile will be removed
+#         ${@} - Type of caches if esxi_id specified in ${1}
+# Return: 0    - The cachefile path is returned correctly
 #
 function remove_cachefile_for {
   local \
@@ -1619,7 +1627,7 @@ function run_hook {
 #                          and error descriptions (prefixed with ||) to display if they occur
 # Modify: ${vm_ids[@]}   - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
 #         ${esxi_ids[@]} - Keys - identifiers of hypervisors, values - 'SKIPPING' messages
-# Output:                - The stdout from remote command
+# Output: >&1            - The stdout from remote command
 # Return: 0              - If it's alright
 #         1              - In other cases
 #
@@ -1744,11 +1752,8 @@ function run_on_hypervisor {
 #
 #  Input: ${esxi_ids[@]}             - Keys - identifiers of hypervisors, Values - 'SKIPPING' messages
 #         ${iso_id}                  - The iso-image identifier
-#         ${my_all_params[@]}        - Keys - parameter name with identifier of build in next format:
-#                                      {esxi_or_vm_identifier}.{parameter_name}
-#                                      Values - value of parameter
-#         ${my_config_esxi_list[@]}  - Keys - identifier of esxi (actual sequence number)
-#                                      Values - the name of esxi
+#         ${my_all_params[@]}        - GLOBAL (see description at top)
+#         ${my_config_esxi_list[@]}  - GLOBAL (see description at top)
 #         ${my_uploaded_iso_list[@]} - Keys - identifier of iso-image
 #                                      (the short sha1-hash from '${esxi_id}-${esxi_datastore}-${iso_filename}')
 #                                      Values - 'SKIPPING' messages
@@ -1797,13 +1802,9 @@ function show_processed_iso_status {
 # Function to print the processed virtual machines status
 #
 #  Input: ${esxi_ids[@]}            - Keys - identifiers of hypervisors, Values - 'SKIPPING' messages
-#         ${my_all_params[@]}       - Keys - parameter name with identifier of build in next format:
-#                                     {esxi_or_vm_identifier}.{parameter_name}
-#                                     Values - value of parameter
-#         ${my_config_esxi_list[@]} - Keys - identifier of esxi (actual sequence number)
-#                                     Values - the name of esxi
-#         ${my_config_vm_list[@]}   - Keys - identifier of virtual machine (actual sequence number)
-#                                     Values - the name of virtual machine
+#         ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
 #         ${vm_id}                  - The identifier the current processed virtual machine
 #                                     for cases where the process is interrupted
 #         ${vm_ids[@]}              - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages

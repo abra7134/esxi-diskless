@@ -8,18 +8,26 @@ MY_NAME="Script for building ISO-images from templates"
 MY_VARIABLES=("BUILD_CONFIG_PATH" "BUILD_OUTPUT_DIR")
 MY_VERSION="2.210616"
 
+# The configuration file path
 BUILD_CONFIG_PATH="${BUILD_CONFIG_PATH:-"${0%.sh}.ini"}"
+# The directory to save artifacts
 BUILD_OUTPUT_DIR="${BUILD_OUTPUT_DIR:-"."}"
 
 my_name="${0}"
 my_dir="${0%/*}"
 my_base_layers_dir="${my_dir}/base_layers"
 
+# Default options for 'mkisofs' executables
 OPTS_MKISOFS="-input-charset utf-8 -volid ubuntu"
 
-# my_all_params - associative array with all params from configuration file
-#                 the first number of the index name is the build number, the digit "0" is reserved for default settings
-#                 other build numbers will be referenced in "my_builds_list" associative array
+# ${my_all_params[@]}  - Associative array with all parameters from configuration file
+#                        Key - ${id}.${name}
+#                              ${id} - the resource identifier, the digit "0" is reserved for default settings
+#                                      other resource numbers will be referenced in my_*_list associative arrays
+#                              ${name} - the parameter name
+# ${my_builds_list[@]} - List of builds from configuration file
+#                        Key - the build identifier, value - the build name
+#
 # for example:
 #
 # my_all_params=(
@@ -32,24 +40,25 @@ OPTS_MKISOFS="-input-charset utf-8 -volid ubuntu"
 # )
 #
 declare -A \
-  my_all_params=() \
-  my_options=() \
-  my_options_map=() \
+  my_all_params=(
+    [0.base_layer]="REQUIRED"
+    [0.repo_url]=""
+    [0.repo_checkout]="master"
+    [0.repo_clone_into]="repo/"
+    [0.repo_depth]=1
+    [0.run_from_repo]="/deploy.sh"
+  ) ]
   my_builds_list=()
 
-# Init default values
-my_all_params=(
-  [0.base_layer]="REQUIRED"
-  [0.repo_url]=""
-  [0.repo_checkout]="master"
-  [0.repo_clone_into]="repo/"
-  [0.repo_depth]=1
-  [0.run_from_repo]="/deploy.sh"
-)
-# The map with supported command line options and him descriptions
-my_options_map=(
-  [-f]="Force rebuild the already builded templates"
-)
+# ${my_options[@]}     - Array with options which were specified on the command line
+#                        Key - the command line option name, Value - "yes" string
+# ${my_options_map[@]} - Array with all supported command line options and them descriptions
+#                        Key - the command line option name, Value - the option description
+declare -A \
+  my_options=() \
+  my_options_map=(
+    [-f]="Force rebuild the already builded templates"
+  )
 
 set -o errexit
 set -o errtrace
@@ -272,10 +281,11 @@ function skipping {
 # and array with options for script operation controls
 #
 #  Input: ${@}                     - List of virtual machines names
+#         ${my_options_map[@]}     - GLOBAL (see description at top)
 #         ${options_supported[@]}  - List of supported options supported by the command
-# Modify: ${my_options[@]}         - Keys - options names, values - "yes" string
-#         ${builds_ids[@]}         - Keys - identifiers of builds, values - empty string
+# Modify: ${builds_ids[@]}         - Keys - identifiers of builds, values - empty string
 #         ${builds_ids_ordered[@]} - Values - identifiers of builds in order of their indication
+#         ${my_options[@]}         - GLOBAL (see description at top)
 # Return: 0                        - Always
 #
 function parse_args_list {
@@ -343,12 +353,9 @@ function parse_args_list {
 
 # The function to parse configuration file
 #
-#  Input: ${BUILD_CONFIG_PATH}  - The path to configuration INI-file
-# Modify: ${my_all_params}      - Keys - parameter name with identifier of build in next format:
-#                                 {build_identifier}.{parameter_name}
-#                                 Values - value of parameter
-#         ${my_builds_list[@]}  - Keys - identifier of build (actual sequence number)
-#                                 Values - name of build from configuration file
+#  Input: ${BUILD_CONFIG_PATH}  - GLOBAL (see description at top)
+# Modify: ${my_all_params}      - GLOBAL (see description at top)
+#         ${my_builds_list[@]}  - GLOBAL (see description at top)
 # Return: 0                     - The parse complete without errors
 #
 function parse_ini_file {
