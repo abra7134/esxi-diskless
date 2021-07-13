@@ -335,9 +335,10 @@ function get_hash {
 
 # Function for getting the needed VM or ESXi parameters
 #
-#  Input: ${1}         - The identifier of virtual machine or esxi on regex notation
-# Modify: ${params[@]} - Keys - parameters names, Values - parameters values
-# Return: 0            - Always
+#  Input: ${1}            - The identifier of virtual machine or esxi on regex notation
+#         ${my_params[@]} - GLOBAL (see description at top)
+# Modify: ${params[@]}    - Keys - parameters names, Values - parameters values
+# Return: 0               - Always
 #
 function get_params {
   local \
@@ -345,11 +346,11 @@ function get_params {
     param=""
 
   params=()
-  for param in "${!my_all_params[@]}"
+  for param in "${!my_params[@]}"
   do
     if [[ "${param}" =~ ^(${regex_id})\.(.*)$ ]]
     then
-      params[${BASH_REMATCH[2]}]="${my_all_params[${param}]}"
+      params[${BASH_REMATCH[2]}]="${my_params[${param}]}"
     fi
   done
 
@@ -393,8 +394,8 @@ function print_param() {
     param="${1}" \
     id="${2}"
 
-  local value="${my_all_params[${id}.${param}]}"
-  if [ "${value}" != "${my_all_params[0.${param}]}" ]
+  local value="${my_params[${id}.${param}]}"
+  if [ "${value}" != "${my_params[0.${param}]}" ]
   then
     echo -e "${COLOR_WHITE}${value}${COLOR_NORMAL}"
   else
@@ -486,9 +487,8 @@ function run_command {
 
 # Function to print warning with usage of the command
 #
-#  Input: ${@}                     - The usage message
-#         ${options_supported[@]}  - The array of supported options by command (see also ${my_options_map})
-# Return: Don't return
+#  Input: ${@}                       - The usage message
+#         ${supported_my_options[@]} - The array of supported options by command (see also ${my_options_desc})
 #
 function show_usage {
   local \
@@ -504,9 +504,9 @@ function show_usage {
   done
 
   usage_message+=("")
-  for option in "${options_supported[@]}"
+  for option in "${supported_my_options[@]}"
   do
-    if [ -v my_options_map[${option}] ]
+    if [ -v my_options_desc[${option}] ]
     then
       printf \
         -v option_message \
@@ -514,14 +514,14 @@ function show_usage {
         "%-9s %-4s %s"\
         "${first_line:+Options:}" \
         "${option}" \
-        "${my_options_map[${option}]}"
+        "${my_options_desc[${option}]}"
       usage_message+=(
         "${option_message}"
       )
       first_line=""
     else
       internal \
-        "The '${option}' option specified at \${options_supported[@]} don't exists in \${my_options_map[@]} array"
+        "The '${option}' option specified at \${supported_my_options[@]} don't exists in \${my_options_desc[@]} array"
     fi
   done
 

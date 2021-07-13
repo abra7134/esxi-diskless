@@ -18,12 +18,12 @@ ESXI_CONFIG_PATH="${ESXI_CONFIG_PATH:-"${0%.sh}.ini"}"
 my_name="${0}"
 my_dir="${0%/*}"
 
-# ${my_all_params[@]}       - Associative array with all parameters from configuration file
+# ${my_params[@]}           - Associative array with all parameters from configuration file
 #                             Key - ${id}.${name}
 #                                   ${id} - the resource identifier, the digit "0" is reserved for default settings
 #                                           other resource numbers will be referenced in my_*_list associative arrays
 #                                   ${name} - the parameter name
-# ${my_all_params_count}    - The identifier of last recorded resource
+# ${my_params_last_id}      - The identifier of last recorded resource
 # ${my_config_esxi_list[@]} - List of esxi hypervisors filled from configuration file
 #                             Key - the hypervisor identifier, value - the hypervisor name
 # ${my_config_vm_list[@]}   - List of virtual machines filled from configuration file
@@ -33,7 +33,7 @@ my_dir="${0%/*}"
 #
 # for example:
 #
-# my_all_params=(
+# my_params=(
 #   [0.esxi_password]="password"
 #   [0.vm_guest_type]="debian8-64"
 #   [0.vm_ipv4_address]="7.7.7.7"
@@ -52,9 +52,9 @@ my_dir="${0%/*}"
 # )
 #
 declare \
-  my_all_params_count=0
+  my_params_last_id=0
 declare -A \
-  my_all_params=(
+  my_params=(
     [0.esxi_hostname]="REQUIRED"
     [0.esxi_ssh_password]=""
     [0.esxi_ssh_port]="22"
@@ -80,13 +80,13 @@ declare -A \
   my_config_vm_list=() \
   my_real_vm_list=()
 
-# ${my_options[@]}     - Array with options which were specified on the command line
-#                        Key - the command line option name, Value - "yes" string
-# ${my_options_map[@]} - Array with all supported command line options and them descriptions
-#                        Key - the command line option name, Value - the option description
+# ${my_options[@]}      - Array with options which were specified on the command line
+#                         Key - the command line option name, Value - "yes" string
+# ${my_options_desc[@]} - Array with all supported command line options and them descriptions
+#                         Key - the command line option name, Value - the option description
 declare -A \
   my_options=() \
-  my_options_map=(
+  my_options_desc=(
     [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
     [-dt]="Don't trust the .sha1 files (calculate checksums again and compare with .sha1 files)"
     [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
@@ -261,7 +261,7 @@ function check_vm_params {
 #         ${2}                      - The virtual machine identified on hypervisor
 #         ${3}                      - The hypervisor identifier at ${my_config_esxi_list} array
 #         ${temp_dir}               - The temporary directory to save commands outputs
-#         ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_params[@]}           - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
 # Return: 0                         - If simple operation is successful
 #         another                   - In other cases
@@ -441,7 +441,7 @@ function esxi_vm_simple_command {
 #                                     the retrieve the actual cachefile path
 #         ${2}                      - Type of cache if esxi_id specified in ${1}
 #         ${CACHE_DIR}              - GLOBAL (see description at top)
-#         ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_params[@]}           - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
 #         ${my_real_vm_list[@]}     - GLOBAL (see description at top)
 # Output: >&1                       - The actual path to cachefile
@@ -459,7 +459,7 @@ function get_cachefile_path_for {
     cachefile_for="esxi"
   elif [ -v my_real_vm_list[${cachefile_for}] ]
   then
-    esxi_id="${my_all_params[${cachefile_for}.at]}"
+    esxi_id="${my_params[${cachefile_for}.at]}"
   else
     internal \
       "The unknown \${cachefile_for}=\"${cachefile_for}\" specified" \
@@ -468,7 +468,7 @@ function get_cachefile_path_for {
 
   local \
     esxi_name="${my_config_esxi_list[${esxi_id}]}" \
-    esxi_hostname="${my_all_params[${esxi_id}.esxi_hostname]}"
+    esxi_hostname="${my_params[${esxi_id}.esxi_hostname]}"
   local \
     cachefile_basepath="${CACHE_DIR}/esxi-${esxi_name}-${esxi_hostname}"
 
@@ -478,7 +478,7 @@ function get_cachefile_path_for {
   else
     local \
       vm_name="${my_real_vm_list[${cachefile_for}]}" \
-      vm_esxi_id="${my_all_params[${cachefile_for}.vm_esxi_id]}"
+      vm_esxi_id="${my_params[${cachefile_for}.vm_esxi_id]}"
     echo "${cachefile_basepath}/vm-${vm_esxi_id}-${vm_name}.vmx"
   fi
 
@@ -487,15 +487,15 @@ function get_cachefile_path_for {
 
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
-#  Input: ${1}                     - The type of retrieving ('full' with vm parameters and 'simple')
-#         ${@}                     - The list esxi'es identifiers to
-#         ${temp_dir}              - The temporary directory to save cache files if CACHE_DIR="-"
-#         ${CACHE_DIR}             - GLOBAL (see description at top)
-#         ${CACHE_VALID}           - GLOBAL (see description at top)
-# Modify: ${my_all_params[@]}      - GLOBAL (see description at top)
-#         ${my_all_params_count}   - GLOBAL (see description at top)
-#         ${my_real_vm_list[@]}    - GLOBAL (see description at top)
-# Return: 0                        - The retrieving information is complete successful
+#  Input: ${1}                  - The type of retrieving ('full' with vm parameters and 'simple')
+#         ${@}                  - The list esxi'es identifiers to
+#         ${temp_dir}           - The temporary directory to save cache files if CACHE_DIR="-"
+#         ${CACHE_DIR}          - GLOBAL (see description at top)
+#         ${CACHE_VALID}        - GLOBAL (see description at top)
+# Modify: ${my_params[@]}       - GLOBAL (see description at top)
+#         ${my_params_last_id}  - GLOBAL (see description at top)
+#         ${my_real_vm_list[@]} - GLOBAL (see description at top)
+# Return: 0                     - The retrieving information is complete successful
 #
 function get_real_vm_list {
   local \
@@ -641,7 +641,7 @@ function get_real_vm_list {
           autostart_param_value="${BASH_REMATCH[2]}"
           if [ -v my_esxi_autostart_params[${autostart_param_name}] ]
           then
-            my_all_params[${esxi_id}.esxi_autostart_${autostart_param_name,,}]="${autostart_param_value}"
+            my_params[${esxi_id}.esxi_autostart_${autostart_param_name,,}]="${autostart_param_value}"
           else
             error \
               "The unknown '${autostart_param_name}' parameter obtained from hypervisor" \
@@ -735,11 +735,11 @@ function get_real_vm_list {
         vm_esxi_id="${BASH_REMATCH[1]}"
         vm_name="${BASH_REMATCH[2]}"
 
-        let my_all_params_count+=1
-        real_vm_id="${my_all_params_count}"
+        let my_params_last_id+=1
+        real_vm_id="${my_params_last_id}"
         my_real_vm_list[${real_vm_id}]="${vm_name}"
-        my_all_params[${real_vm_id}.vm_esxi_id]="${vm_esxi_id}"
-        my_all_params[${real_vm_id}.at]="${esxi_id}"
+        my_params[${real_vm_id}.vm_esxi_id]="${vm_esxi_id}"
+        my_params[${real_vm_id}.at]="${esxi_id}"
 
         if [    "${get_type}" = "full" \
              -a "${vmx_failed}" != "yes" ]
@@ -765,7 +765,7 @@ function get_real_vm_list {
           if [    -f "${vmx_filepath}" \
                -a -s "${vmx_filepath}" ]
           then
-            my_all_params[${real_vm_id}.vmx_parameters]="yes"
+            my_params[${real_vm_id}.vmx_parameters]="yes"
 
             while \
               read -r \
@@ -778,7 +778,7 @@ function get_real_vm_list {
                 if [ -v my_params_map[${vmx_param_name}] ]
                 then
                   vmx_param_value="${BASH_REMATCH[2]}"
-                  my_all_params[${real_vm_id}.${vmx_param_name}]="${vmx_param_value}"
+                  my_params[${real_vm_id}.${vmx_param_name}]="${vmx_param_value}"
                 elif [ "${vmx_param_name}" = "ide0:0.fileName" ]
                 then
                   vmx_param_value="${BASH_REMATCH[2]}"
@@ -790,12 +790,12 @@ function get_real_vm_list {
                       if [ "${filesystem_name}" = "${filesystems_uuids[${filesystem_id}]}" ]
                       then
                         filesystem_name="${filesystems_names[${filesystem_id}]}"
-                        my_all_params[${real_vm_id}.special.vm_esxi_datastore_mapped]="yes"
+                        my_params[${real_vm_id}.special.vm_esxi_datastore_mapped]="yes"
                         break
                       fi
                     done
-                    my_all_params[${real_vm_id}.special.vm_esxi_datastore]="${filesystem_name}"
-                    my_all_params[${real_vm_id}.special.local_iso_path]="${BASH_REMATCH[3]}"
+                    my_params[${real_vm_id}.special.vm_esxi_datastore]="${filesystem_name}"
+                    my_params[${real_vm_id}.special.local_iso_path]="${BASH_REMATCH[3]}"
                   else
                     error \
                       "Cannot parse the ISO-image path '${vmx_param_value}' obtained from hypervisor vmx" \
@@ -878,8 +878,8 @@ function get_real_vm_list {
               then
                 for real_vm_id in "${!my_real_vm_list[@]}"
                 do
-                  if [    "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" \
-                       -a "${my_all_params[${real_vm_id}.vm_esxi_id]}" = "${BASH_REMATCH[1]}" ]
+                  if [    "${my_params[${real_vm_id}.at]}" = "${esxi_id}" \
+                       -a "${my_params[${real_vm_id}.vm_esxi_id]}" = "${BASH_REMATCH[1]}" ]
                   then
                     continue 2
                   fi
@@ -896,9 +896,9 @@ function get_real_vm_list {
               then
                 if [[ "${autostart_param_value}" =~ ^[[:digit:]]+$ ]]
                 then
-                  my_all_params[${real_vm_id}.special.vm_autostart]="yes"
+                  my_params[${real_vm_id}.special.vm_autostart]="yes"
                 else
-                  my_all_params[${real_vm_id}.special.vm_autostart]="no"
+                  my_params[${real_vm_id}.special.vm_autostart]="no"
                 fi
               fi
             fi
@@ -915,8 +915,8 @@ function get_real_vm_list {
 # The function to parse configuration file
 #
 #  Input: ${ESXI_CONFIG_PATH}       - GLOBAL (see description at top)
-# Modify: ${my_all_params[@]}       - GLOBAL (see description at top)
-#         ${my_all_params_count}    - GLOBAL (see description at top)
+# Modify: ${my_params[@]}           - GLOBAL (see description at top)
+#         ${my_params_last_id}      - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
 #         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
 # Return: 0                         - The parse complete without errors
@@ -999,7 +999,7 @@ function parse_ini_file {
         ;;
       * )
         [ -z "${value}" \
-          -a "${my_all_params[0.${param}]}" != "" ] \
+          -a "${my_params[0.${param}]}" != "" ] \
         && \
           error="it must be not empty"
         ;;
@@ -1121,7 +1121,7 @@ function parse_ini_file {
           "The INI-resource must not start with a '-' character as it is used to specify options" \
           "Please correct the name and try again"
       else
-        let my_all_params_count+=1
+        let my_params_last_id+=1
         case "${section_name}"
         in
           "esxi_list" )
@@ -1134,7 +1134,7 @@ function parse_ini_file {
                 "The duplicate esxi definiton '${config_resource_name}'" \
                 "Please remove or correct its name and try again"
             else
-              my_config_esxi_list[${my_all_params_count}]="${config_resource_name}"
+              my_config_esxi_list[${my_params_last_id}]="${config_resource_name}"
             fi
             ;;
           "vm_list" )
@@ -1155,7 +1155,7 @@ function parse_ini_file {
                 "The definition '${config_resource_name}' already used in [esxi_list] section" \
                 "Please use different names for virtual machines and hypervisors"
             else
-              my_config_vm_list[${my_all_params_count}]="${config_resource_name}"
+              my_config_vm_list[${my_params_last_id}]="${config_resource_name}"
             fi
             ;;
           * )
@@ -1181,14 +1181,14 @@ function parse_ini_file {
         config_parameters="${BASH_REMATCH[3]}"
 
         # Compare with names of default values (with prefix '0.')
-        if [ ! -v my_all_params[0.${config_parameter}] \
+        if [ ! -v my_params[0.${config_parameter}] \
                -a "${config_parameter}" != "at" ]
         then
           error_config \
             "The unknown INI-parameter name '${config_parameter}'" \
             "Please correct (correct names specified at ${config_path}.example) and try again"
-        elif [    ${my_all_params_count} -gt 0 \
-               -a -v my_all_params[${my_all_params_count}.${config_parameter}] ]
+        elif [    ${my_params_last_id} -gt 0 \
+               -a -v my_params[${my_params_last_id}.${config_parameter}] ]
         then
           error_config \
             "The parameter '${config_parameter}' is already defined early" \
@@ -1227,9 +1227,9 @@ function parse_ini_file {
         check_param_value \
           "${config_parameter}" \
           "${config_value}"
-        my_all_params[${my_all_params_count}.${config_parameter}]="${config_value}"
+        my_params[${my_params_last_id}.${config_parameter}]="${config_value}"
 
-        # If line ending with '\' symbol, associate the parameters from next line with current ${my_all_params_count}
+        # If line ending with '\' symbol, associate the parameters from next line with current ${my_params_last_id}
         if [ "${config_parameters}" = "\\" ]
         then
           use_previous_resource="yes"
@@ -1244,16 +1244,16 @@ function parse_ini_file {
   < "${config_path}"
 
   # Fill in all missing fields in [esxi_list] and [vm_list] sections from default values with some checks
-  for config_parameter in "${!my_all_params[@]}"
+  for config_parameter in "${!my_params[@]}"
   do
     if [[ "${config_parameter}" =~ ^0\.(esxi_.*)$ ]]
     then
       # Override the parameter name without prefix
       config_parameter="${BASH_REMATCH[1]}"
-      default_value="${my_all_params[0.${config_parameter}]}"
+      default_value="${my_params[0.${config_parameter}]}"
       for esxi_id in "${!my_config_esxi_list[@]}"
       do
-        if [ ! -v my_all_params[${esxi_id}.${config_parameter}] ]
+        if [ ! -v my_params[${esxi_id}.${config_parameter}] ]
         then
 
           if [ "${default_value}" = "REQUIRED" ]
@@ -1264,7 +1264,7 @@ function parse_ini_file {
               "Please fill the value of parameter and try again"
           fi
 
-          my_all_params[${esxi_id}.${config_parameter}]="${default_value}"
+          my_params[${esxi_id}.${config_parameter}]="${default_value}"
         fi
       done
     elif [[ "${config_parameter}" =~ ^0\.(.*)$ ]]
@@ -1273,7 +1273,7 @@ function parse_ini_file {
       config_parameter="${BASH_REMATCH[1]}"
       for vm_id in "${!my_config_vm_list[@]}"
       do
-        if [ ! -v my_all_params[${vm_id}.at] ]
+        if [ ! -v my_params[${vm_id}.at] ]
         then
           error \
             "Problem in configuration file:" \
@@ -1281,15 +1281,15 @@ function parse_ini_file {
             "Please add the 'at' definition and try again"
         fi
 
-        esxi_id="${my_all_params[${vm_id}.at]}"
-        if [ ! -v my_all_params[${vm_id}.${config_parameter}] ]
+        esxi_id="${my_params[${vm_id}.at]}"
+        if [ ! -v my_params[${vm_id}.${config_parameter}] ]
         then
 
-          if [ -v my_all_params[${esxi_id}.${config_parameter}] ]
+          if [ -v my_params[${esxi_id}.${config_parameter}] ]
           then
-            default_value="${my_all_params[${esxi_id}.${config_parameter}]}"
+            default_value="${my_params[${esxi_id}.${config_parameter}]}"
           else
-            default_value="${my_all_params[0.${config_parameter}]}"
+            default_value="${my_params[0.${config_parameter}]}"
           fi
 
           if [ "${default_value}" = "REQUIRED" ]
@@ -1300,7 +1300,7 @@ function parse_ini_file {
               "Please fill the value of parameter and try again"
           fi
 
-          my_all_params[${vm_id}.${config_parameter}]="${default_value}"
+          my_params[${vm_id}.${config_parameter}]="${default_value}"
         fi
       done
     fi
@@ -1313,15 +1313,15 @@ function parse_ini_file {
 # and preparing 3 arrays with identifiers of encountered hypervisors and virtual machines,
 # and 1 array with options for script operation controls
 #
-#  Input: ${@}                     - List of options, virtual machines names or hypervisors names
-#         ${my_options_map[@]}     - GLOBAL (see description at top)
-#         ${options_supported[@]}  - List of supported options supported by the command
-# Modify: ${my_options[@]}         - GLOBAL (see description at top)
-#         ${esxi_ids[@]}           - Keys - identifiers of hypervisors, values - empty string
-#         ${esxi_ids_ordered[@]}   - Values - identifiers of hypervisors in order of their indication
-#         ${vm_ids[@]}             - Keys - identifiers of virtual machines, values - empty string
-#         ${vm_ids_ordered[@]}     - Values - identifiers of virtual machines in order of their indication
-# Return: 0                        - Always
+#  Input: ${@}                       - List of options, virtual machines names or hypervisors names
+#         ${my_options_desc[@]}      - GLOBAL (see description at top)
+#         ${supported_my_options[@]} - List of supported options supported by the command
+# Modify: ${my_options[@]}           - GLOBAL (see description at top)
+#         ${esxi_ids[@]}             - Keys - identifiers of hypervisors, values - empty string
+#         ${esxi_ids_ordered[@]}     - Values - identifiers of hypervisors in order of their indication
+#         ${vm_ids[@]}               - Keys - identifiers of virtual machines, values - empty string
+#         ${vm_ids_ordered[@]}       - Values - identifiers of virtual machines in order of their indication
+# Return: 0                          - Always
 #
 function parse_args_list {
   local \
@@ -1343,15 +1343,15 @@ function parse_args_list {
       if \
         finded_duplicate \
           "${arg_name}" \
-          "${options_supported[@]}"
+          "${supported_my_options[@]}"
       then
-        if [ -v my_options_map["${arg_name}"] ]
+        if [ -v my_options_desc["${arg_name}"] ]
         then
           my_options[${arg_name}]="yes"
           continue
         else
           internal \
-            "The '${arg_name}' option specified at \${options_supported[@]} don't finded at \${my_options_map[@]} array"
+            "The '${arg_name}' option specified at \${supported_my_options[@]} don't finded at \${my_options_desc[@]} array"
         fi
       else
         warning \
@@ -1372,7 +1372,7 @@ function parse_args_list {
             "${vm_id}"
           )
 
-          esxi_id="${my_all_params[${vm_id}.at]}"
+          esxi_id="${my_params[${vm_id}.at]}"
           if [ ! -v esxi_ids[${esxi_id}] ]
           then
             esxi_ids[${esxi_id}]=""
@@ -1400,7 +1400,7 @@ function parse_args_list {
 
         for vm_id in "${!my_config_vm_list[@]}"
         do
-          if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" \
+          if [ "${my_params[${vm_id}.at]}" = "${esxi_id}" \
                -a ! -v vm_ids[${vm_id}] ]
           then
             vm_ids[${vm_id}]=""
@@ -1438,25 +1438,25 @@ function ping_host {
 
 # Function-wrapper with prepare steps for any command
 #
-#  Input: ${1}                      - The type of retrieving forwarded to 'get_real_vm_list' function
-#         ${@}                      - The command line arguments forwarded to 'parse_args_list' function
-#         ${CACHE_DIR}              - GLOBAL (see description at top)
-#         ${CACHE_VALID}            - GLOBAL (see description at top)
-#         ${ESXI_CONFIG_PATH}       - GLOBAL (see description at top)
-#         ${MY_DEPENDENCIES[@]}     - GLOBAL (see description at top)
-#         ${my_options_map[@]}      - GLOBAL (see description at top)
-#         ${options_supported[@]}   - List of supported options supported by the command
-# Modify: ${my_all_params[@]}       - GLOBAL (see description at top)
-#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
-#         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
-#         ${my_real_vm_list[@]}     - GLOBAL (see description at top)
-#         ${my_options[@]}          - GLOBAL (see description at top)
-#         ${esxi_ids[@]}            - Keys - identifiers of hypervisors, values - empty string
-#         ${esxi_ids_ordered[@]}    - Values - identifiers of hypervisors in order of their indication
-#         ${vm_ids[@]}              - Keys - identifiers of virtual machines, values - empty string
-#         ${vm_ids_ordered[@]}      - Values - identifiers of virtual machines in order of their indication
-#         ${temp_dir}               - The created temporary directory path
-# Return: 0                         - Prepare steps successful completed
+#  Input: ${1}                       - The type of retrieving forwarded to 'get_real_vm_list' function
+#         ${@}                       - The command line arguments forwarded to 'parse_args_list' function
+#         ${CACHE_DIR}               - GLOBAL (see description at top)
+#         ${CACHE_VALID}             - GLOBAL (see description at top)
+#         ${ESXI_CONFIG_PATH}        - GLOBAL (see description at top)
+#         ${MY_DEPENDENCIES[@]}      - GLOBAL (see description at top)
+#         ${my_options_desc[@]}      - GLOBAL (see description at top)
+#         ${supported_my_options[@]} - List of supported options supported by the command
+# Modify: ${my_params[@]}            - GLOBAL (see description at top)
+#         ${my_config_esxi_list[@]}  - GLOBAL (see description at top)
+#         ${my_config_vm_list[@]}    - GLOBAL (see description at top)
+#         ${my_real_vm_list[@]}      - GLOBAL (see description at top)
+#         ${my_options[@]}           - GLOBAL (see description at top)
+#         ${esxi_ids[@]}             - Keys - identifiers of hypervisors, values - empty string
+#         ${esxi_ids_ordered[@]}     - Values - identifiers of hypervisors in order of their indication
+#         ${vm_ids[@]}               - Keys - identifiers of virtual machines, values - empty string
+#         ${vm_ids_ordered[@]}       - Values - identifiers of virtual machines in order of their indication
+#         ${temp_dir}                - The created temporary directory path
+# Return: 0                          - Prepare steps successful completed
 #
 function prepare_steps {
   check_dependencies
@@ -1752,7 +1752,7 @@ function run_on_hypervisor {
 #
 #  Input: ${esxi_ids[@]}             - Keys - identifiers of hypervisors, Values - 'SKIPPING' messages
 #         ${iso_id}                  - The iso-image identifier
-#         ${my_all_params[@]}        - GLOBAL (see description at top)
+#         ${my_params[@]}            - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]}  - GLOBAL (see description at top)
 #         ${my_uploaded_iso_list[@]} - Keys - identifier of iso-image
 #                                      (the short sha1-hash from '${esxi_id}-${esxi_datastore}-${iso_filename}')
@@ -1770,10 +1770,10 @@ function show_processed_iso_status {
 
     for iso_id in "${!my_uploaded_iso_list[@]}"
     do
-      esxi_id="${my_all_params[${iso_id}.esxi_id]}"
+      esxi_id="${my_params[${iso_id}.esxi_id]}"
       esxi_name="${my_config_esxi_list[${esxi_id}]}"
-      esxi_datastore="${my_all_params[${iso_id}.esxi_datastore]}"
-      local_iso_path="${my_all_params[${iso_id}.local_iso_path]}"
+      esxi_datastore="${my_params[${iso_id}.esxi_datastore]}"
+      local_iso_path="${my_params[${iso_id}.local_iso_path]}"
 
       if [ -z "${my_uploaded_iso_list[${iso_id}]}" ]
       then
@@ -1802,7 +1802,7 @@ function show_processed_iso_status {
 # Function to print the processed virtual machines status
 #
 #  Input: ${esxi_ids[@]}            - Keys - identifiers of hypervisors, Values - 'SKIPPING' messages
-#         ${my_all_params[@]}       - GLOBAL (see description at top)
+#         ${my_params[@]}           - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
 #         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
 #         ${vm_id}                  - The identifier the current processed virtual machine
@@ -1828,9 +1828,9 @@ function show_processed_vm_status {
     echo >&2 "Virtual machines processing status:"
     for vm_id in "${vm_ids_ordered[@]}"
     do
-      esxi_id="${my_all_params[${vm_id}.at]}"
+      esxi_id="${my_params[${vm_id}.at]}"
       esxi_name="${my_config_esxi_list[${esxi_id}]}"
-      vm_esxi_datastore="${my_all_params[${vm_id}.vm_esxi_datastore]}"
+      vm_esxi_datastore="${my_params[${vm_id}.vm_esxi_datastore]}"
       vm_name="${my_config_vm_list[${vm_id}]}"
 
       if [ -z "${vm_ids[${vm_id}]}" ]
@@ -1950,7 +1950,7 @@ function command_create {
   fi
 
   local \
-    options_supported=("-d" "-f" "-i" "-n" "-sn")
+    supported_my_options=("-d" "-f" "-i" "-n" "-sn")
 
   if [ "${#}" -lt 1 ]
   then
@@ -2007,7 +2007,7 @@ function command_create {
   for vm_id in "${vm_ids_ordered[@]}"
   do
     vm_name="${my_config_vm_list[${vm_id}]}"
-    esxi_id="${my_all_params[${vm_id}.at]}"
+    esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
     # Skip if we have any error on hypervisor
@@ -2025,21 +2025,21 @@ function command_create {
     do
       if [ "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
       then
-        if [ "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" ]
+        if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
         then
           if [ -n "${vm_esxi_id}" ]
           then
             skipping \
               "Found multiple virtual machines with the same name on hypervisor" \
-              "with '${vm_esxi_id}' and '${my_all_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+              "with '${vm_esxi_id}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
               "Please check it manually and rename the one of the virtual machine"
             continue 2
           fi
-          vm_esxi_id="${my_all_params[${real_vm_id}.vm_esxi_id]}"
+          vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}"
         else
-          another_esxi_id="${my_all_params[${real_vm_id}.at]}"
-          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_all_params[${another_esxi_id}.esxi_hostname]})"
-          another_vm_esxi_id="${my_all_params[${real_vm_id}.vm_esxi_id]}"
+          another_esxi_id="${my_params[${real_vm_id}.at]}"
+          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_params[${another_esxi_id}.esxi_hostname]})"
+          another_vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}"
         fi
       fi
     done
@@ -2444,7 +2444,7 @@ function command_ls {
   fi
 
   local \
-    options_supported=("-n")
+    supported_my_options=("-n")
 
   local -A \
     esxi_ids=() \
@@ -2472,7 +2472,7 @@ function command_ls {
     for id in "${!esxi_ids[@]}" "${!vm_ids[@]}"
     do
       # The small hack without condition since parameters are not found in both lists at once
-      hostname="${my_all_params[${id}.esxi_hostname]}${my_all_params[${id}.vm_ipv4_address]}"
+      hostname="${my_params[${id}.esxi_hostname]}${my_params[${id}.vm_ipv4_address]}"
       if ping_host "${hostname}"
       then
         ping_status[${id}]="${COLOR_GREEN}"
@@ -2506,7 +2506,7 @@ function command_ls {
 
     for vm_id in "${!vm_ids[@]}"
     do
-      if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" ]
+      if [ "${my_params[${vm_id}.at]}" = "${esxi_id}" ]
       then
         printf -- \
           "\n  ${ping_status[${vm_id}]}%s${COLOR_NORMAL} (%s@%s:%s) [%s]:\n" \
@@ -2559,7 +2559,7 @@ function command_show {
   fi
 
   local \
-    options_supported=("-i" "-n")
+    supported_my_options=("-i" "-n")
 
   if [ -z "${1}" ]
   then
@@ -2654,9 +2654,9 @@ function command_show {
       "${!my_config_vm_list[@]}" \
       "${!my_real_vm_list[@]}"
     do
-      if [ "${my_all_params[${vm_id}.at]}" = "${esxi_id}" ]
+      if [ "${my_params[${vm_id}.at]}" = "${esxi_id}" ]
       then
-        if [ -v my_all_params[${vm_id}.vm_esxi_id] ]
+        if [ -v my_params[${vm_id}.vm_esxi_id] ]
         then
           real_vm_ids[${vm_id}]=""
           vm_name="${my_real_vm_list[${vm_id}]}"
@@ -2669,19 +2669,19 @@ function command_show {
         do
           if [ "${vm_name}" = "${my_real_vm_list[${real_vm_id}]}" ]
           then
-            if [ -v my_all_params[${vm_id}.vm_esxi_id] ]
+            if [ -v my_params[${vm_id}.vm_esxi_id] ]
             then
-              if [    "${my_all_params[${real_vm_id}.at]}" != "${esxi_id}" \
+              if [    "${my_params[${real_vm_id}.at]}" != "${esxi_id}" \
                    -a "${vm_id}" != "${real_vm_id}" ]
               then
-                real_vm_ids[${vm_id}]+="${real_vm_ids[${vm_id}]:+, }'${my_config_esxi_list[${my_all_params[${real_vm_id}.at]}]}'"
+                real_vm_ids[${vm_id}]+="${real_vm_ids[${vm_id}]:+, }'${my_config_esxi_list[${my_params[${real_vm_id}.at]}]}'"
               fi
             else
-              if [ "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" ]
+              if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
               then
-                my_all_params[${vm_id}.real_vm_ids]+="${real_vm_id} "
+                my_params[${vm_id}.real_vm_ids]+="${real_vm_id} "
               else
-                config_vm_ids[${vm_id}]+="${config_vm_ids[${vm_id}]:+, }'${my_config_esxi_list[${my_all_params[${real_vm_id}.at]}]}'"
+                config_vm_ids[${vm_id}]+="${config_vm_ids[${vm_id}]:+, }'${my_config_esxi_list[${my_params[${real_vm_id}.at]}]}'"
               fi
             fi
           fi
@@ -2704,9 +2704,9 @@ function command_show {
 
     for config_vm_id in "${!config_vm_ids[@]}"
     do
-      if [ -n "${my_all_params[${config_vm_id}.real_vm_ids]}" ]
+      if [ -n "${my_params[${config_vm_id}.real_vm_ids]}" ]
       then
-        for real_vm_id in ${my_all_params[${config_vm_id}.real_vm_ids]}
+        for real_vm_id in ${my_params[${config_vm_id}.real_vm_ids]}
         do
           if [ -v vm_ids[${config_vm_id}] ]
           then
@@ -2718,32 +2718,32 @@ function command_show {
           printf -- \
             "   ${color_selected}%-${column_width}s${COLOR_NORMAL} | %-${column_width}s | %s\n" \
             "${my_config_vm_list[${config_vm_id}]}" \
-            "${my_real_vm_list[${real_vm_id}]} (${my_all_params[${real_vm_id}.vm_esxi_id]})" \
+            "${my_real_vm_list[${real_vm_id}]} (${my_params[${real_vm_id}.vm_esxi_id]})" \
             "${real_vm_ids[${real_vm_id}]}"
           unset real_vm_ids[${real_vm_id}]
           unset config_vm_ids[${config_vm_id}]
 
           if [ -v vm_ids[${config_vm_id}] ]
           then
-            if [ "${my_all_params[${real_vm_id}.vmx_parameters]}" = "yes" ]
+            if [ "${my_params[${real_vm_id}.vmx_parameters]}" = "yes" ]
             then
               echo "  ${separator_line}"
               for vmx_param in "${!my_params_map[@]}"
               do
                 config_param="${my_params_map[${vmx_param}]}"
-                config_value="${my_all_params[${config_vm_id}.${config_param}]}"
+                config_value="${my_params[${config_vm_id}.${config_param}]}"
                 datastore_attention=""
 
-                if [ -v my_all_params[${real_vm_id}.${vmx_param}] ]
+                if [ -v my_params[${real_vm_id}.${vmx_param}] ]
                 then
-                  real_value="${my_all_params[${real_vm_id}.${vmx_param}]}"
+                  real_value="${my_params[${real_vm_id}.${vmx_param}]}"
                   if [ "${config_value}" = "${real_value}" ]
                   then
                     color_difference="${COLOR_NORMAL}"
                   else
                     color_difference="${COLOR_YELLOW}"
                     if [    "${config_param}" = "vm_esxi_datastore" \
-                         -a "${my_all_params[${real_vm_id}.${vmx_param}_mapped]}" != "yes" ]
+                         -a "${my_params[${real_vm_id}.${vmx_param}_mapped]}" != "yes" ]
                     then
                       datastore_attention="!!! cannot get volume name, so mismatch may not be accurate"
                     fi
@@ -2842,7 +2842,7 @@ function command_update {
   fi
 
   local \
-    options_supported=("-i" "-n" "-sn") \
+    supported_my_options=("-i" "-n" "-sn") \
     update_params_supported=("local_iso_path")
 
   if [ "${#}" -lt 1 ]
@@ -2904,7 +2904,7 @@ function command_update {
   for vm_id in "${vm_ids_ordered[@]}"
   do
     vm_name="${my_config_vm_list[${vm_id}]}"
-    esxi_id="${my_all_params[${vm_id}.at]}"
+    esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
     # Skip if we have any error on hypervisor
@@ -2922,21 +2922,21 @@ function command_update {
     do
       if [ "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
       then
-        if [ "${my_all_params[${real_vm_id}.at]}" = "${esxi_id}" ]
+        if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
         then
           if [ -n "${vm_esxi_id}" ]
           then
             skipping \
               "Found multiple virtual machines with the same name on hypervisor" \
-              "with '${vm_esxi_id}' and '${my_all_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+              "with '${vm_esxi_id}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
               "Please check it manually and rename the one of the virtual machine"
             continue 2
           fi
-          vm_esxi_id="${my_all_params[${real_vm_id}.vm_esxi_id]}"
+          vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}"
           vm_real_id="${real_vm_id}"
         else
-          another_esxi_id="${my_all_params[${real_vm_id}.at]}"
-          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_all_params[${another_esxi_id}.esxi_hostname]})"
+          another_esxi_id="${my_params[${real_vm_id}.at]}"
+          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_params[${another_esxi_id}.esxi_hostname]})"
         fi
       fi
     done
@@ -2966,7 +2966,7 @@ function command_update {
       update_parameter="special.${update_parameter}"
     fi
 
-    if [ "${params[${update_parameter#special.}]}" = "${my_all_params[${vm_real_id}.${update_parameter}]}" ]
+    if [ "${params[${update_parameter#special.}]}" = "${my_params[${vm_real_id}.${update_parameter}]}" ]
     then
       skipping \
         "No update required, parameter already has the required value"
@@ -3138,7 +3138,7 @@ function command_upload {
   }
 
   local \
-    options_supported=("-dt" "-ff")
+    supported_my_options=("-dt" "-ff")
 
   if [ "${#}" -lt 1 ]
   then
@@ -3204,22 +3204,22 @@ function command_upload {
 
     if [ -v my_uploaded_iso_list[${iso_id}] ]
     then
-      if [ "${my_all_params[${iso_id}.local_iso_path]}" != "${local_iso_path}" ]
+      if [ "${my_params[${iso_id}.local_iso_path]}" != "${local_iso_path}" ]
       then
         warning \
           "The duplicated ISO-image definition (having the same name but in different locations) finded:" \
           "1. '${local_iso_path}' ISO-image defined for '${my_config_vm_list[${vm_id}]}' virtual machine" \
-          "2. '${my_all_params[${iso_id}.local_iso_path]}' ISO-image defined for '${my_all_params[${iso_id}.vm_name]}' virtual machine" \
+          "2. '${my_params[${iso_id}.local_iso_path]}' ISO-image defined for '${my_params[${iso_id}.vm_name]}' virtual machine" \
           "" \
           "Please check the configuration, an image with a unique name must be in only one instance"
       fi
     else
       my_uploaded_iso_list[${iso_id}]=""
-      my_all_params[${iso_id}.local_iso_path]="${local_iso_path}"
-      my_all_params[${iso_id}.esxi_id]="${esxi_id}"
-      my_all_params[${iso_id}.esxi_datastore]="${esxi_datastore}"
+      my_params[${iso_id}.local_iso_path]="${local_iso_path}"
+      my_params[${iso_id}.esxi_id]="${esxi_id}"
+      my_params[${iso_id}.esxi_datastore]="${esxi_datastore}"
       # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
-      my_all_params[${iso_id}.vm_name]="${my_config_vm_list[${vm_id}]}"
+      my_params[${iso_id}.vm_name]="${my_config_vm_list[${vm_id}]}"
     fi
   done
 

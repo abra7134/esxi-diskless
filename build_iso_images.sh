@@ -20,17 +20,18 @@ my_base_layers_dir="${my_dir}/base_layers"
 # Default options for 'mkisofs' executables
 OPTS_MKISOFS="-input-charset utf-8 -volid ubuntu"
 
-# ${my_all_params[@]}  - Associative array with all parameters from configuration file
+# ${my_params[@]}      - Associative array with all parameters from configuration file
 #                        Key - ${id}.${name}
 #                              ${id} - the resource identifier, the digit "0" is reserved for default settings
 #                                      other resource numbers will be referenced in my_*_list associative arrays
 #                              ${name} - the parameter name
+# ${my_params_last_id} - The identifier of last recorded resource
 # ${my_builds_list[@]} - List of builds from configuration file
 #                        Key - the build identifier, value - the build name
 #
 # for example:
 #
-# my_all_params=(
+# my_params=(
 #   [0.base_layer]="xenial-amd64-minbase"
 #   [1.base_layer]="stretch-amd64-minbase"
 #   [1.repo_checkout]="develop"
@@ -39,8 +40,10 @@ OPTS_MKISOFS="-input-charset utf-8 -volid ubuntu"
 #   [1]="xenial-air"
 # )
 #
+declare \
+  my_params_last_id=0
 declare -A \
-  my_all_params=(
+  my_params=(
     [0.base_layer]="REQUIRED"
     [0.repo_url]=""
     [0.repo_checkout]="master"
@@ -50,13 +53,13 @@ declare -A \
   ) ]
   my_builds_list=()
 
-# ${my_options[@]}     - Array with options which were specified on the command line
-#                        Key - the command line option name, Value - "yes" string
-# ${my_options_map[@]} - Array with all supported command line options and them descriptions
-#                        Key - the command line option name, Value - the option description
+# ${my_options[@]}      - Array with options which were specified on the command line
+#                         Key - the command line option name, Value - "yes" string
+# ${my_options_desc[@]} - Array with all supported command line options and them descriptions
+#                         Key - the command line option name, Value - the option description
 declare -A \
   my_options=() \
-  my_options_map=(
+  my_options_desc=(
     [-f]="Force rebuild the already builded templates"
   )
 
@@ -280,13 +283,13 @@ function skipping {
 # and preparing 2 arrays with identifiers of encountered builds,
 # and array with options for script operation controls
 #
-#  Input: ${@}                     - List of virtual machines names
-#         ${my_options_map[@]}     - GLOBAL (see description at top)
-#         ${options_supported[@]}  - List of supported options supported by the command
-# Modify: ${builds_ids[@]}         - Keys - identifiers of builds, values - empty string
-#         ${builds_ids_ordered[@]} - Values - identifiers of builds in order of their indication
-#         ${my_options[@]}         - GLOBAL (see description at top)
-# Return: 0                        - Always
+#  Input: ${@}                       - List of virtual machines names
+#         ${my_options_desc[@]}      - GLOBAL (see description at top)
+#         ${supported_my_options[@]} - List of supported options supported by the command
+# Modify: ${builds_ids[@]}           - Keys - identifiers of builds, values - empty string
+#         ${builds_ids_ordered[@]}   - Values - identifiers of builds in order of their indication
+#         ${my_options[@]}           - GLOBAL (see description at top)
+# Return: 0                          - Always
 #
 function parse_args_list {
   local \
@@ -303,15 +306,15 @@ function parse_args_list {
       if \
         finded_duplicate \
           "${arg_name}" \
-          "${options_supported[@]}"
+          "${supported_my_options[@]}"
       then
-        if [ -v my_options_map["${arg_name}"] ]
+        if [ -v my_options_desc["${arg_name}"] ]
         then
           my_options[${arg_name}]="yes"
           continue
         else
           internal \
-            "The '${arg_name}' option specified at \${options_supported[@]} don't finded at \${my_options_map[@]} array"
+            "The '${arg_name}' option specified at \${supported_my_options[@]} don't finded at \${my_options_desc[@]} array"
         fi
       else
         warning \
@@ -354,7 +357,8 @@ function parse_args_list {
 # The function to parse configuration file
 #
 #  Input: ${BUILD_CONFIG_PATH}  - GLOBAL (see description at top)
-# Modify: ${my_all_params}      - GLOBAL (see description at top)
+# Modify: ${my_params[@]}       - GLOBAL (see description at top)
+#         ${my_params_last_id}  - GLOBAL (see description at top)
 #         ${my_builds_list[@]}  - GLOBAL (see description at top)
 # Return: 0                     - The parse complete without errors
 #
@@ -424,7 +428,6 @@ function parse_ini_file {
   fi
 
   local \
-    build_id=0 \
     build_name="" \
     config_lineno=0 \
     config_section_name="" \
@@ -474,9 +477,9 @@ function parse_ini_file {
           "Please remove or correct its name and try again"
       fi
 
-      let build_id+=1
+      let my_params_last_id+=1
       build_name="${config_section_name}"
-      my_builds_list[${build_id}]="${build_name}"
+      my_builds_list[${my_params_last_id}]="${build_name}"
 
     # Parse INI-parameters
     # like "param1="value1""
@@ -495,12 +498,12 @@ function parse_ini_file {
       fi
 
       # Compare with names of default values (with prefix '0.')
-      if [ ! -v my_all_params[0.${config_parameter}] ]
+      if [ ! -v my_params[0.${config_parameter}] ]
       then
         error_config \
           "The unknown INI-parameter name '${config_parameter}'" \
           "Please correct (correct names specified at ${config_path}.example) and try again"
-      elif [ -v my_all_params[${build_id}.${config_parameter}] ]
+      elif [ -v my_params[${my_params_last_id}.${config_parameter}] ]
       then
         error_config \
           "The parameter '${config_parameter}' is already defined early" \
@@ -510,7 +513,7 @@ function parse_ini_file {
       check_param_value \
         "${config_parameter}" \
         "${config_value}"
-      my_all_params[${build_id}.${config_parameter}]="${config_value}"
+      my_params[${my_params_last_id}.${config_parameter}]="${config_value}"
 
     else
       error_config \
@@ -521,18 +524,21 @@ function parse_ini_file {
   done \
   < "${config_path}"
 
+  local \
+    build_id=""
+
   # Fill in all missing fields in [esxi_list] and [vm_list] sections from default values with some checks
-  for config_parameter in "${!my_all_params[@]}"
+  for config_parameter in "${!my_params[@]}"
   do
     if [[ "${config_parameter}" =~ ^0\.(.*)$ ]]
     then
       # Override the parameter name without prefix
       config_parameter="${BASH_REMATCH[1]}"
-      default_value="${my_all_params[0.${config_parameter}]}"
+      default_value="${my_params[0.${config_parameter}]}"
 
       for build_id in "${!my_builds_list[@]}"
       do
-        if [ ! -v my_all_params[${build_id}.${config_parameter}] ]
+        if [ ! -v my_params[${build_id}.${config_parameter}] ]
         then
           if [ "${default_value}" = "REQUIRED" ]
           then
@@ -542,7 +548,7 @@ function parse_ini_file {
               "Please fill the value of parameter and try again"
           fi
 
-          my_all_params[${build_id}.${config_parameter}]="${default_value}"
+          my_params[${build_id}.${config_parameter}]="${default_value}"
         fi
       done
     fi
@@ -606,7 +612,7 @@ function command_build {
   fi
 
   local \
-    options_supported=("-f")
+    supported_my_options=("-f")
 
   if [ -z "${1}" ]
   then
@@ -1006,7 +1012,7 @@ function command_ls {
       "${COLOR_GREEN}%s${COLOR_NORMAL} (on '%s' base layer)\n" \
       "${build_name}" \
       "$(print_param base_layer ${build_id})"
-    if [ -n "${my_all_params[${build_id}.repo_url]}" ]
+    if [ -n "${my_params[${build_id}.repo_url]}" ]
     then
       printf -- \
         "  repo_url=\"%s\"\n" \
