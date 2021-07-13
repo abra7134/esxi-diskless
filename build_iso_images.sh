@@ -63,6 +63,16 @@ declare -A \
     [-f]="Force rebuild the already builded templates"
   )
 
+# ${my_builds_ids[@]}         - The array with statuses of processed builds
+#                               Key - the build identifier
+#                               Value - the 'SKIPPING' message if the error has occurred
+# ${my_builds_ids_ordered[@]} - The array with ordered list of processed builds
+#                               Is ordered according to the order in which they are specified on the command line
+declare -A \
+  my_builds_ids=()
+declare \
+  my_builds_ids_ordered=()
+
 set -o errexit
 set -o errtrace
 
@@ -253,11 +263,11 @@ function get_base_layer_tar_path {
 }
 
 # Function to print 'SKIPPING' message
-# and writing the 'SKIPPING' message in builds_ids[@] array
+# and writing the 'SKIPPING' message in ${my_builds_ids[@]} array
 #
-#  Input: ${@}             - The message to print
-# Modify: ${builds_ids[@]} - Keys - identifiers of builds, values - 'SKIPPING' messages
-# Return: 0                - Always
+#  Input: ${@}                - The message to print
+# Modify: ${my_builds_ids[@]} - GLOBAL (see description at top)
+# Return: 0                   - Always
 #
 function skipping {
   if [ -n "${1}" ]
@@ -267,11 +277,11 @@ function skipping {
       "${@}" \
     >&2
 
-    if [ ${#builds_ids[@]} -gt 0 ]
+    if [ ${#my_builds_ids[@]} -gt 0 ]
     then
-      if [ -v builds_ids[${build_id}] ]
+      if [ -v my_builds_ids[${build_id}] ]
       then
-        builds_ids[${build_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
+        my_builds_ids[${build_id}]="${COLOR_RED}SKIPPED${COLOR_NORMAL} (${1})"
       fi
     fi
   fi
@@ -295,9 +305,6 @@ function parse_args_list {
   local \
     arg_name="" \
     build_id=""
-
-  builds_ids=()
-  builds_ids_ordered=()
 
   for arg_name in "${@}"
   do
@@ -328,10 +335,10 @@ function parse_args_list {
       if [ "${arg_name}" = "all" \
            -o "${arg_name}" = "${my_builds_list[${build_id}]}" ]
       then
-        if [ ! -v builds_ids[${build_id}] ]
+        if [ ! -v my_builds_ids[${build_id}] ]
         then
-          builds_ids[${build_id}]=""
-          builds_ids_ordered+=(
+          my_builds_ids[${build_id}]=""
+          my_builds_ids_ordered+=(
             "${build_id}"
           )
         fi
@@ -559,10 +566,10 @@ function parse_ini_file {
 
 # Function to print the processed virtual machines status
 #
-#  Input: ${build_id}       - The identifier the current processed virtual machine
-#                             for cases where the process is interrupted
-#         ${builds_ids[@]}  - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
-# Return: 0                 - Always
+#  Input: ${build_id}         - The identifier the current processed virtual machine
+#                               for cases where the process is interrupted
+#         ${my_builds_ids[@]} - GLOBAL (see description at top)
+# Return: 0                   - Always
 #
 function show_processed_builds_status {
   local \
@@ -572,20 +579,20 @@ function show_processed_builds_status {
     build_name="" \
     build_status=""
 
-  if [ "${#builds_ids[@]}" -gt 0 ]
+  if [ "${#my_builds_ids[@]}" -gt 0 ]
   then
     echo >&2 -e "${COLOR_NORMAL}"
     echo >&2 "Processed builds status:"
-    for build_id in "${!builds_ids[@]}"
+    for build_id in "${!my_builds_ids[@]}"
     do
       build_name="${my_builds_list[${build_id}]}"
 
       if [ "${build_id}" = "${aborted_build_id}" \
-           -a -z "${builds_ids[${build_id}]}" ]
+           -a -z "${my_builds_ids[${build_id}]}" ]
       then
         build_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
       else
-        build_status="${builds_ids[${build_id}]:-NOT PROCESSED}"
+        build_status="${my_builds_ids[${build_id}]:-NOT PROCESSED}"
       fi
 
       printf -- \
@@ -652,15 +659,9 @@ function command_build {
 
   check_root_run
   parse_ini_file
-
-  local -A \
-    builds_ids=()
-  local \
-    builds_ids_ordered=()
-
   parse_args_list "${@}"
 
-  if [ "${#builds_ids[@]}" -lt 1 ]
+  if [ "${#my_builds_ids[@]}" -lt 1 ]
   then
     warning \
       "No template name or names specified to build" \
@@ -692,7 +693,7 @@ function command_build {
     repo_dir="" \
     repo_head_short_hash="" \
 
-  for build_id in "${builds_ids_ordered[@]}"
+  for build_id in "${my_builds_ids_ordered[@]}"
   do
     build_name="${my_builds_list[${build_id}]}"
 
@@ -946,7 +947,7 @@ EOF
       continue
     fi
 
-    builds_ids[${build_id}]="${COLOR_GREEN}BUILDED${COLOR_NORMAL} (${image_path})"
+    my_builds_ids[${build_id}]="${COLOR_GREEN}BUILDED${COLOR_NORMAL} (${image_path})"
     let builded_images+=1
 
   done
@@ -959,7 +960,7 @@ EOF
   >&2 \
     "\nTotal: %d builded, %d skipped images" \
     ${builded_images} \
-    $((${#builds_ids[@]}-builded_images))
+    $((${#my_builds_ids[@]}-builded_images))
 }
 
 function command_ls {
@@ -978,18 +979,13 @@ function command_ls {
       "Please fill a configuration file and try again"
   fi
 
-  local -A \
-    builds_ids=()
-  local \
-    builds_ids_ordered=()
-
   # Parse args list if it not empty
   if [ "${#}" -gt 0 ]
   then
     parse_args_list "${@}"
   fi
   # And parse again with all builds if the previous step return the empty list
-  if [ "${#builds_ids[@]}" -lt 1 ]
+  if [ "${#my_builds_ids[@]}" -lt 1 ]
   then
     parse_args_list "${my_builds_list[@]}"
   fi
@@ -1004,7 +1000,7 @@ function command_ls {
     build_id="" \
     build_name=""
 
-  for build_id in "${!builds_ids[@]}"
+  for build_id in "${!my_builds_ids[@]}"
   do
     build_name="${my_builds_list[${build_id}]}"
 
@@ -1032,7 +1028,7 @@ function command_ls {
 
   printf -- \
     "Total: %d (of %d) images displayed\n" \
-    "${#builds_ids[@]}" \
+    "${#my_builds_ids[@]}" \
     "${#my_builds_list[@]}"
 
   exit 0

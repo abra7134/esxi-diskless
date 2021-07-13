@@ -125,9 +125,21 @@ declare -A \
     [special.local_iso_path]="local_iso_path"
   )
 
+# ${my_*_ids[@]}         - Arrays with statuses of processed hypervisors, virtual machines or ISO-images
+#                          Key - the resource identifier (esxi_id, vm_id or iso_id)
+#                          Value - the 'SKIPPING' message if the error has occurred
+# ${my_*_ids_ordered[@]} - The arrays with ordered list of processed hypervisors, virtual machines or ISO-images
+#                          The list of virtual machines ${my_vm_ids_ordered[@]} is ordered according to the order
+#                          in which they are specified on the command line
+#                          Other lists are ordered indirectly as mentioned in the process of virtual machines
 declare -A \
-  my_uploaded_iso_list=()
-
+  my_esxi_ids=() \
+  my_iso_ids=() \
+  my_vm_ids=()
+declare \
+  my_esxi_ids_ordered=() \
+  my_iso_ids_ordered=() \
+  my_vm_ids_ordered=()
 
 set -o errexit
 set -o errtrace
@@ -1315,12 +1327,12 @@ function parse_ini_file {
 #
 #  Input: ${@}                       - List of options, virtual machines names or hypervisors names
 #         ${my_options_desc[@]}      - GLOBAL (see description at top)
-#         ${supported_my_options[@]} - List of supported options supported by the command
+#         ${supported_my_options[@]} - List of command line options supported by the command
 # Modify: ${my_options[@]}           - GLOBAL (see description at top)
-#         ${esxi_ids[@]}             - Keys - identifiers of hypervisors, values - empty string
-#         ${esxi_ids_ordered[@]}     - Values - identifiers of hypervisors in order of their indication
-#         ${vm_ids[@]}               - Keys - identifiers of virtual machines, values - empty string
-#         ${vm_ids_ordered[@]}       - Values - identifiers of virtual machines in order of their indication
+#         ${my_esxi_ids[@]}          - GLOBAL (see description at top)
+#         ${my_esxi_ids_ordered[@]}  - GLOBAL (see description at top)
+#         ${my_vm_ids[@]}            - GLOBAL (see description at top)
+#         ${my_vm_ids_ordered[@]}    - GLOBAL (see description at top)
 # Return: 0                          - Always
 #
 function parse_args_list {
@@ -1330,11 +1342,6 @@ function parse_args_list {
     esxi_id="" \
     vm_id="" \
     vm_name=""
-
-  esxi_ids=()
-  esxi_ids_ordered=()
-  vm_ids=()
-  vm_ids_ordered=()
 
   for arg_name in "${@}"
   do
@@ -1365,18 +1372,18 @@ function parse_args_list {
       vm_name="${my_config_vm_list[${vm_id}]}"
       if [ "${arg_name}" = "${vm_name}" ]
       then
-        if [ ! -v vm_ids[${vm_id}] ]
+        if [ ! -v my_vm_ids[${vm_id}] ]
         then
-          vm_ids[${vm_id}]=""
-          vm_ids_ordered+=(
+          my_vm_ids[${vm_id}]=""
+          my_vm_ids_ordered+=(
             "${vm_id}"
           )
 
           esxi_id="${my_params[${vm_id}.at]}"
-          if [ ! -v esxi_ids[${esxi_id}] ]
+          if [ ! -v my_esxi_ids[${esxi_id}] ]
           then
-            esxi_ids[${esxi_id}]=""
-            esxi_ids_ordered+=(
+            my_esxi_ids[${esxi_id}]=""
+            my_esxi_ids_ordered+=(
               "${esxi_id}"
             )
           fi
@@ -1390,10 +1397,10 @@ function parse_args_list {
       esxi_name="${my_config_esxi_list[${esxi_id}]}"
       if [ "${arg_name}" = "${esxi_name}" ]
       then
-        if [ ! -v esxi_ids[${esxi_id}] ]
+        if [ ! -v my_esxi_ids[${esxi_id}] ]
         then
-          esxi_ids[${esxi_id}]=""
-          esxi_ids_ordered+=(
+          my_esxi_ids[${esxi_id}]=""
+          my_esxi_ids_ordered+=(
             "${esxi_id}"
           )
         fi
@@ -1401,10 +1408,10 @@ function parse_args_list {
         for vm_id in "${!my_config_vm_list[@]}"
         do
           if [ "${my_params[${vm_id}.at]}" = "${esxi_id}" \
-               -a ! -v vm_ids[${vm_id}] ]
+               -a ! -v my_vm_ids[${vm_id}] ]
           then
-            vm_ids[${vm_id}]=""
-            vm_ids_ordered+=(
+            my_vm_ids[${vm_id}]=""
+            my_vm_ids_ordered+=(
               "${vm_id}"
             )
           fi
@@ -1451,10 +1458,10 @@ function ping_host {
 #         ${my_config_vm_list[@]}    - GLOBAL (see description at top)
 #         ${my_real_vm_list[@]}      - GLOBAL (see description at top)
 #         ${my_options[@]}           - GLOBAL (see description at top)
-#         ${esxi_ids[@]}             - Keys - identifiers of hypervisors, values - empty string
-#         ${esxi_ids_ordered[@]}     - Values - identifiers of hypervisors in order of their indication
-#         ${vm_ids[@]}               - Keys - identifiers of virtual machines, values - empty string
-#         ${vm_ids_ordered[@]}       - Values - identifiers of virtual machines in order of their indication
+#         ${my_esxi_ids[@]}          - GLOBAL (see description at top)
+#         ${my_esxi_ids_ordered[@]}  - GLOBAL (see description at top)
+#         ${my_vm_ids[@]}            - GLOBAL (see description at top)
+#         ${my_vm_ids_ordered[@]}    - GLOBAL (see description at top)
 #         ${temp_dir}                - The created temporary directory path
 # Return: 0                          - Prepare steps successful completed
 #
@@ -1492,8 +1499,8 @@ function prepare_steps {
   # if the previous step return the empty list
   if [ "${command_name}" = "ls" ]
   then
-    if [    "${#vm_ids[@]}" -lt 1 \
-         -a "${#esxi_ids[@]}" -lt 1 ]
+    if [    "${#my_vm_ids[@]}" -lt 1 \
+         -a "${#my_esxi_ids[@]}" -lt 1 ]
     then
       parse_args_list "${my_config_esxi_list[@]}"
     fi
@@ -1517,7 +1524,7 @@ function prepare_steps {
         info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only (specified '-n' option)"
         get_real_vm_list \
           "${get_type}" \
-          "${!esxi_ids[@]}"
+          "${!my_esxi_ids[@]}"
       else
         if [ "${my_options[-d]}" = "yes" ]
         then
@@ -1621,15 +1628,15 @@ function run_hook {
 
 # Function to run remote command on hypervisor through SSH-connection
 #
-#  Input: ${1}           - The esxi identifier to run command on
-#         ${2}           - The command 'ssh' or 'scp'
-#         ${@}           - List of commands to run on the hypervisor
-#                          and error descriptions (prefixed with ||) to display if they occur
-# Modify: ${vm_ids[@]}   - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
-#         ${esxi_ids[@]} - Keys - identifiers of hypervisors, values - 'SKIPPING' messages
-# Output: >&1            - The stdout from remote command
-# Return: 0              - If it's alright
-#         1              - In other cases
+#  Input: ${1}              - The esxi identifier to run command on
+#         ${2}              - The command 'ssh' or 'scp'
+#         ${@}              - List of commands to run on the hypervisor
+#                             and error descriptions (prefixed with ||) to display if they occur
+# Modify: ${my_vm_ids[@]}   - GLOBAL (see description at top)
+#         ${my_esxi_ids[@]} - GLOBAL (see description at top)
+# Output: >&1               - The stdout from remote command
+# Return: 0                 - If it's alright
+#         1                 - In other cases
 #
 function run_on_hypervisor {
   local \
@@ -1750,17 +1757,16 @@ function run_on_hypervisor {
 
 # Function to print the ISO-images upload status
 #
-#  Input: ${esxi_ids[@]}             - Keys - identifiers of hypervisors, Values - 'SKIPPING' messages
-#         ${iso_id}                  - The iso-image identifier
-#         ${my_params[@]}            - GLOBAL (see description at top)
-#         ${my_config_esxi_list[@]}  - GLOBAL (see description at top)
-#         ${my_uploaded_iso_list[@]} - Keys - identifier of iso-image
-#                                      (the short sha1-hash from '${esxi_id}-${esxi_datastore}-${iso_filename}')
-#                                      Values - 'SKIPPING' messages
-# Return: 0                          - Always
+#  Input: ${iso_id}                 - The iso-image identifier
+#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${my_esxi_ids[@]}         - GLOBAL (see description at top)
+#         ${my_iso_ids[@]}          - GLOBAL (see description at top)
+#         ${my_iso_ids_ordered[@]}  - GLOBAL (see description at top)
+#         ${my_params[@]}           - GLOBAL (see description at top)
+# Return: 0                         - Always
 #
 function show_processed_iso_status {
-  if [ "${#my_uploaded_iso_list[@]}" -gt 0 ]
+  if [ "${#my_iso_ids[@]}" -gt 0 ]
   then
     local \
       aborted_iso_id="${iso_id}"
@@ -1768,18 +1774,18 @@ function show_processed_iso_status {
     echo >&2 -e "${COLOR_NORMAL}"
     echo >&2 "ISO-images upload status:"
 
-    for iso_id in "${!my_uploaded_iso_list[@]}"
+    for iso_id in "${my_iso_ids_ordered[@]}"
     do
       esxi_id="${my_params[${iso_id}.esxi_id]}"
       esxi_name="${my_config_esxi_list[${esxi_id}]}"
       esxi_datastore="${my_params[${iso_id}.esxi_datastore]}"
       local_iso_path="${my_params[${iso_id}.local_iso_path]}"
 
-      if [ -z "${my_uploaded_iso_list[${iso_id}]}" ]
+      if [ -z "${my_iso_ids[${iso_id}]}" ]
       then
-        if [ -n "${esxi_ids[${esxi_id}]}" ]
+        if [ -n "${my_esxi_ids[${esxi_id}]}" ]
         then
-          iso_status="${esxi_ids[${esxi_id}]}"
+          iso_status="${my_esxi_ids[${esxi_id}]}"
         elif [ "${iso_id}" = "${aborted_iso_id}" ]
         then
           iso_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
@@ -1787,7 +1793,7 @@ function show_processed_iso_status {
           iso_status="NOT PROCESSED"
         fi
       else
-        iso_status="${my_uploaded_iso_list[${iso_id}]}"
+        iso_status="${my_iso_ids[${iso_id}]}"
       fi
 
       printf -- \
@@ -1801,14 +1807,14 @@ function show_processed_iso_status {
 
 # Function to print the processed virtual machines status
 #
-#  Input: ${esxi_ids[@]}            - Keys - identifiers of hypervisors, Values - 'SKIPPING' messages
-#         ${my_params[@]}           - GLOBAL (see description at top)
-#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#  Input: ${my_config_esxi_list[@]} - GLOBAL (see description at top)
 #         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
+#         ${my_esxi_ids[@]}         - GLOBAL (see description at top)
+#         ${my_params[@]}           - GLOBAL (see description at top)
+#         ${my_vm_ids[@]}           - GLOBAL (see description at top)
+#         ${my_vm_ids_ordered[@]}   - GLOBAL (see description at top)
 #         ${vm_id}                  - The identifier the current processed virtual machine
 #                                     for cases where the process is interrupted
-#         ${vm_ids[@]}              - Keys - identifiers of virtual machines, Values - 'SKIPPING' messages
-#         ${vm_ids_ordered[@]}      - Values - identifiers of virtual machines in order of their indication
 # Return: 0                         - Always
 #
 function show_processed_vm_status {
@@ -1822,22 +1828,22 @@ function show_processed_vm_status {
     vm_name="" \
     vm_status=""
 
-  if [ "${#vm_ids[@]}" -gt 0 ]
+  if [ "${#my_vm_ids[@]}" -gt 0 ]
   then
     echo >&2 -e "${COLOR_NORMAL}"
     echo >&2 "Virtual machines processing status:"
-    for vm_id in "${vm_ids_ordered[@]}"
+    for vm_id in "${my_vm_ids_ordered[@]}"
     do
       esxi_id="${my_params[${vm_id}.at]}"
       esxi_name="${my_config_esxi_list[${esxi_id}]}"
       vm_esxi_datastore="${my_params[${vm_id}.vm_esxi_datastore]}"
       vm_name="${my_config_vm_list[${vm_id}]}"
 
-      if [ -z "${vm_ids[${vm_id}]}" ]
+      if [ -z "${my_vm_ids[${vm_id}]}" ]
       then
-        if [ -n "${esxi_ids[${esxi_id}]}" ]
+        if [ -n "${my_esxi_ids[${esxi_id}]}" ]
         then
-          vm_status="${esxi_ids[${esxi_id}]}"
+          vm_status="${my_esxi_ids[${esxi_id}]}"
         elif [ "${vm_id}" = "${aborted_vm_id}" ]
         then
           vm_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
@@ -1845,7 +1851,7 @@ function show_processed_vm_status {
           vm_status="NOT PROCESSED"
         fi
       else
-        vm_status="${vm_ids[${vm_id}]}"
+        vm_status="${my_vm_ids[${vm_id}]}"
       fi
 
       printf -- \
@@ -1861,8 +1867,8 @@ function show_processed_vm_status {
 
 # Function to print the remove failed cachefiles
 #
-#  Input: ${remove_failed_cachefiles[@]}  - Keys - esxi_id or real_vm_id, Values - the remove failed cachefile path
-# Return: 0                               - Always
+#  Input: ${remove_failed_cachefiles[@]} - Keys - esxi_id or real_vm_id, Values - the remove failed cachefile path
+# Return: 0                              - Always
 #
 function show_remove_failed_cachefiles {
   if [ "${#remove_failed_cachefiles[@]}" -gt 0 ]
@@ -1878,18 +1884,18 @@ function show_remove_failed_cachefiles {
 }
 
 # Function to print 'SKIPPING' message
-# and writing the 'SKIPPING' message in vm_ids[@], esxi_ids[@], my_uploaded_iso_list[@] arrays
+# and writing the 'SKIPPING' message in my_vm_ids[@], my_esxi_ids[@], my_iso_ids[@] arrays
 #
-#  Input: ${1}                       - Which array to write the message to (vm, esxi, iso)
-#         ${@}                       - The message to print
-#         ${skipping_type}           - The array in which the 'SKIPPING' message is saved
-#         ${iso_id}                  - The iso-image identifier
-#         ${esxi_id}                 - The hypervisor identifier
-#         ${vm_id}                   - The virtual machine identifier
-# Modify: ${vm_ids[@]}               - Keys - identifiers of virtual machines, values - 'SKIPPING' messages
-#         ${esxi_ids[@]}             - Keys - identifiers of hypervisors, values - 'SKIPPING' messages
-#         ${my_uploaded_iso_list[@]} - Keys - identifiers of ISO-images, values - 'SKIPPING' messages
-# Return: 0                          - Always
+#  Input: ${1}              - Which array to write the message to (vm, esxi, iso)
+#         ${@}              - The message to print
+#         ${iso_id}         - The iso-image identifier
+#         ${esxi_id}        - The hypervisor identifier
+#         ${vm_id}          - The virtual machine identifier
+#         ${skipping_type}  - The array in which the 'SKIPPING' message is saved
+# Modify: ${my_vm_ids[@]}   - GLOBAL (see description at top)
+#         ${my_esxi_ids[@]} - GLOBAL (see description at top)
+#         ${my_iso_ids[@]}  - GLOBAL (see description at top)
+# Return: 0                 - Always
 #
 function skipping {
   local \
@@ -1902,23 +1908,23 @@ function skipping {
   in
     "vm" )
       if [    -n "${vm_id}" \
-           -a -v vm_ids[${vm_id}] ]
+           -a -v my_vm_ids[${vm_id}] ]
       then
-        vm_ids[${vm_id}]="${skipped_prefix}${1:+ (${1})}"
+        my_vm_ids[${vm_id}]="${skipped_prefix}${1:+ (${1})}"
       fi
       ;;
     "esxi" )
       if [    -n "${esxi_id}" \
-           -a -v esxi_ids[${esxi_id}] ]
+           -a -v my_esxi_ids[${esxi_id}] ]
       then
-        esxi_ids[${esxi_id}]="${skipped_prefix}${1:+ (${1})}"
+        my_esxi_ids[${esxi_id}]="${skipped_prefix}${1:+ (${1})}"
       fi
       ;;
     "iso" )
       if [    -n "${iso_id}" \
-           -a -v my_uploaded_iso_list[${iso_id}] ]
+           -a -v my_iso_ids[${iso_id}] ]
       then
-        my_uploaded_iso_list[${iso_id}]="${skipped_prefix}${1:+ (${1})}"
+        my_iso_ids[${iso_id}]="${skipped_prefix}${1:+ (${1})}"
       fi
       ;;
     * )
@@ -1961,13 +1967,6 @@ function command_create {
       "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..."
   fi
 
-  local -A \
-    esxi_ids=() \
-    vm_ids=()
-  local \
-    esxi_ids_ordered=() \
-    vm_ids_ordered=()
-
   prepare_steps \
     simple \
     "${@}"
@@ -2004,14 +2003,14 @@ function command_create {
 
   vm_id_filepath="${temp_dir}/vm_id"
 
-  for vm_id in "${vm_ids_ordered[@]}"
+  for vm_id in "${my_vm_ids_ordered[@]}"
   do
     vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
     # Skip if we have any error on hypervisor
-    [ -n "${esxi_ids[${esxi_id}]}" ] \
+    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
     && continue
 
     get_params "${vm_id}|${esxi_id}"
@@ -2328,7 +2327,7 @@ function command_create {
             "${another_vm_esxi_id}" \
             "${another_esxi_id}"
         then
-          vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see details above)"
+          my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see details above)"
           break
         fi
       fi
@@ -2359,7 +2358,7 @@ function command_create {
             "${vm_esxi_id}" \
             "${esxi_id}"
         then
-          vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to shutdown virtual machine, see details above)"
+          my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to shutdown virtual machine, see details above)"
           break
         fi
 
@@ -2369,13 +2368,13 @@ function command_create {
             "${another_vm_esxi_id}" \
             "${another_esxi_id}"
         then
-          vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see deatils above)"
+          my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see deatils above)"
           break
         fi
 
-        vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (see details above)"
+        my_vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (see details above)"
       else
-        vm_ids[${vm_id}]="${COLOR_YELLOW}${vm_recreated:+RE}CREATED/NO PINGING${COLOR_NORMAL}"
+        my_vm_ids[${vm_id}]="${COLOR_YELLOW}${vm_recreated:+RE}CREATED/NO PINGING${COLOR_NORMAL}"
       fi
 
       let no_pinging_vms+=1
@@ -2384,7 +2383,7 @@ function command_create {
 
     echo "    The virtual machine is alive, continue"
 
-    vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED/PINGED${COLOR_NORMAL}"
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED/PINGED${COLOR_NORMAL}"
     let runned_vms+=1
 
     if [ "${my_options[-d]}" = "yes" ]
@@ -2395,7 +2394,7 @@ function command_create {
           "${another_vm_esxi_id}" \
           "${another_esxi_id}"
       then
-        vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
+        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
         continue
       fi
     fi
@@ -2409,15 +2408,15 @@ function command_create {
           "${vm_name}" \
           "${esxi_name}"
       then
-        vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL}"
+        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL}"
       else
-        vm_ids[${vm_id}]+="${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL}"
+        my_vm_ids[${vm_id}]+="${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL}"
       fi
     fi
 
     if [ "${my_options[-d]}" = "yes" ]
     then
-      vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
+      my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
 
   done
@@ -2431,7 +2430,7 @@ function command_create {
     "\nTotal: %d created, %d created but no pinging, %d skipped virtual machines\n" \
     ${runned_vms} \
     ${no_pinging_vms} \
-    $((${#vm_ids[@]}-runned_vms-no_pinging_vms))
+    $((${#my_vm_ids[@]}-runned_vms-no_pinging_vms))
 
   show_remove_failed_cachefiles
 }
@@ -2445,13 +2444,6 @@ function command_ls {
 
   local \
     supported_my_options=("-n")
-
-  local -A \
-    esxi_ids=() \
-    vm_ids=()
-  local \
-    esxi_ids_ordered=() \
-    vm_ids_ordered=()
 
   prepare_steps \
     simple \
@@ -2469,7 +2461,7 @@ function command_ls {
       id="" \
       hostname=""
 
-    for id in "${!esxi_ids[@]}" "${!vm_ids[@]}"
+    for id in "${!my_esxi_ids[@]}" "${!my_vm_ids[@]}"
     do
       # The small hack without condition since parameters are not found in both lists at once
       hostname="${my_params[${id}.esxi_hostname]}${my_params[${id}.vm_ipv4_address]}"
@@ -2495,7 +2487,7 @@ function command_ls {
     esxi_id="" \
     vm_id=""
 
-  for esxi_id in "${!esxi_ids[@]}"
+  for esxi_id in "${!my_esxi_ids[@]}"
   do
     printf -- \
       "${ping_status[${esxi_id}]}%s${COLOR_NORMAL} (%s@%s:%s):\n" \
@@ -2504,7 +2496,7 @@ function command_ls {
       "$(print_param esxi_hostname ${esxi_id})" \
       "$(print_param esxi_ssh_port ${esxi_id})"
 
-    for vm_id in "${!vm_ids[@]}"
+    for vm_id in "${!my_vm_ids[@]}"
     do
       if [ "${my_params[${vm_id}.at]}" = "${esxi_id}" ]
       then
@@ -2543,9 +2535,9 @@ function command_ls {
 
   printf -- \
     "Total: %d (of %d) hypervisor(s) and %d (of %d) virtual machine(s) them displayed\n" \
-    "${#esxi_ids[@]}" \
+    "${#my_esxi_ids[@]}" \
     "${#my_config_esxi_list[@]}" \
-    "${#vm_ids[@]}" \
+    "${#my_vm_ids[@]}" \
     "${#my_config_vm_list[@]}"
 
   exit 0
@@ -2569,13 +2561,6 @@ function command_show {
       "" \
       "Usage: ${my_name} ${command_name} [options] <esxi_name> [<vm_name>] [<esxi_name>] ..."
   fi
-
-  local -A \
-    esxi_ids=() \
-    vm_ids=()
-  local \
-    esxi_ids_ordered=() \
-    vm_ids_ordered=()
 
   prepare_steps \
     full \
@@ -2620,11 +2605,11 @@ function command_show {
     {1..$((column_width+2))}
   separator_line="${separator_line}+${separator_line}+${separator_line}"
 
-  for esxi_id in "${esxi_ids_ordered[@]}"
+  for esxi_id in "${my_esxi_ids_ordered[@]}"
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
-    if [ -n "${esxi_ids[${esxi_id}]}" ]
+    if [ -n "${my_esxi_ids[${esxi_id}]}" ]
     then
       color_alive="${COLOR_RED}"
     else
@@ -2638,10 +2623,10 @@ function command_show {
       "$(print_param esxi_hostname ${esxi_id})" \
       "$(print_param esxi_ssh_port ${esxi_id})"
 
-    if [ -n "${esxi_ids[${esxi_id}]}" ]
+    if [ -n "${my_esxi_ids[${esxi_id}]}" ]
     then
       echo
-      echo -e "  ${esxi_ids[${esxi_id}]}"
+      echo -e "  ${my_esxi_ids[${esxi_id}]}"
       echo
       continue
     fi
@@ -2708,7 +2693,7 @@ function command_show {
       then
         for real_vm_id in ${my_params[${config_vm_id}.real_vm_ids]}
         do
-          if [ -v vm_ids[${config_vm_id}] ]
+          if [ -v my_vm_ids[${config_vm_id}] ]
           then
             color_selected="${COLOR_WHITE}"
           else
@@ -2723,7 +2708,7 @@ function command_show {
           unset real_vm_ids[${real_vm_id}]
           unset config_vm_ids[${config_vm_id}]
 
-          if [ -v vm_ids[${config_vm_id}] ]
+          if [ -v my_vm_ids[${config_vm_id}] ]
           then
             if [ "${my_params[${real_vm_id}.vmx_parameters]}" = "yes" ]
             then
@@ -2785,7 +2770,7 @@ function command_show {
     do
       config_vm_name="${my_config_vm_list[${config_vm_id}]}"
 
-      if [ -v vm_ids[${config_vm_id}] ]
+      if [ -v my_vm_ids[${config_vm_id}] ]
       then
         color_selected="${COLOR_WHITE}"
       else
@@ -2815,7 +2800,7 @@ function command_show {
 
   printf -- \
     "Total: %d (of %d) hypervisor(s) differences displayed\n" \
-    "${#esxi_ids[@]}" \
+    "${#my_esxi_ids[@]}" \
     "${#my_config_esxi_list[@]}"
 
   if [ "${displayed_alived}" = "yes" ]
@@ -2843,7 +2828,7 @@ function command_update {
 
   local \
     supported_my_options=("-i" "-n" "-sn") \
-    update_params_supported=("local_iso_path")
+    supported_update_params=("local_iso_path")
 
   if [ "${#}" -lt 1 ]
   then
@@ -2854,26 +2839,22 @@ function command_update {
       "Usage: ${my_name} ${command_name} <parameter_name> [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
       "" \
       "Supported parameter names:" \
-      "${update_params_supported[@]/#/* }"
-  elif ! finded_duplicate "${1}" "${update_params_supported[@]}"
+      "${supported_update_params[@]/#/* }"
+  elif ! \
+    finded_duplicate \
+      "${1}" \
+      "${supported_update_params[@]}"
   then
     warning \
       "The '${command_name}' command only supports updating values of the following parameters:" \
-      "${update_params_supported[@]/#/* }" \
+      "${supported_update_params[@]/#/* }" \
       "" \
       "Please specify a correct parameter name and try again"
   fi
 
   local \
-    update_parameter="${1}"
+    update_param="${1}"
   shift
-
-  local -A \
-    esxi_ids=() \
-    vm_ids=()
-  local \
-    esxi_ids_ordered=() \
-    vm_ids_ordered=()
 
   prepare_steps \
     full \
@@ -2901,19 +2882,19 @@ function command_update {
     vm_real_id="" \
     updated_vms=0
 
-  for vm_id in "${vm_ids_ordered[@]}"
+  for vm_id in "${my_vm_ids_ordered[@]}"
   do
     vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
     # Skip if we have any error on hypervisor
-    [ -n "${esxi_ids[${esxi_id}]}" ] \
+    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
     && continue
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will update a '${update_parameter}' parameter at '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]})"
+    info "Will update a '${update_param}' parameter at '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]})"
 
     vm_esxi_id=""
     another_esxi_names=()
@@ -2958,15 +2939,15 @@ function command_update {
     fi
 
     check_vm_params \
-      "${update_parameter}" \
+      "${update_param}" \
     || continue
 
-    if [ "${update_parameter}" = "local_iso_path" ]
+    if [ "${update_param}" = "local_iso_path" ]
     then
-      update_parameter="special.${update_parameter}"
+      update_param="special.${update_param}"
     fi
 
-    if [ "${params[${update_parameter#special.}]}" = "${my_params[${vm_real_id}.${update_parameter}]}" ]
+    if [ "${params[${update_param#special.}]}" = "${my_params[${vm_real_id}.${update_param}]}" ]
     then
       skipping \
         "No update required, parameter already has the required value"
@@ -3035,7 +3016,7 @@ function command_update {
         "Unable to parse the cdrom identifier '${cdrom_id}', it must be prefixed with 'cdrom-'"
     fi
 
-    progress "Update the '${update_parameter}' parameter (govc device.cdrom.insert)"
+    progress "Update the '${update_param}' parameter (govc device.cdrom.insert)"
 
     if ! \
       GOVC_USERNAME="${params[esxi_ssh_username]}" \
@@ -3051,7 +3032,7 @@ function command_update {
         ".iso/${vm_iso_filename}"
     then
       skipping \
-        "Unable to update the '${update_parameter}' parameter"
+        "Unable to update the '${update_param}' parameter"
       continue
     fi
 
@@ -3079,7 +3060,7 @@ function command_update {
       "${vm_real_id}" \
       ""
 
-    vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_parameter#special.})"
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param#special.})"
     let updated_vms+=1
   done
 
@@ -3091,7 +3072,7 @@ function command_update {
   >&2 \
     "\nTotal: %d updated, %d skipped virtual machines\n" \
     ${updated_vms} \
-    $((${#vm_ids[@]}-updated_vms))
+    $((${#my_vm_ids[@]}-updated_vms))
 
   show_remove_failed_cachefiles
 
@@ -3149,13 +3130,6 @@ function command_upload {
       "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..."
   fi
 
-  local -A \
-    esxi_ids=() \
-    vm_ids=()
-  local \
-    esxi_ids_ordered=() \
-    vm_ids_ordered=()
-
   prepare_steps \
     simple \
     "${@}"
@@ -3183,7 +3157,7 @@ function command_upload {
     skipping_type="iso" \
     temp_iso_sha1sum_path="${temp_dir}/sha1sum"
 
-  for vm_id in "${vm_ids_ordered[@]}"
+  for vm_id in "${my_vm_ids_ordered[@]}"
   do
     get_params "${vm_id}"
 
@@ -3202,8 +3176,18 @@ function command_upload {
       continue
     fi
 
-    if [ -v my_uploaded_iso_list[${iso_id}] ]
+    if [ ! -v my_iso_ids[${iso_id}] ]
     then
+      my_iso_ids[${iso_id}]=""
+      my_iso_ids_ordered+=(
+        "${iso_id}"
+      )
+      my_params[${iso_id}.local_iso_path]="${local_iso_path}"
+      my_params[${iso_id}.esxi_id]="${esxi_id}"
+      my_params[${iso_id}.esxi_datastore]="${esxi_datastore}"
+      # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
+      my_params[${iso_id}.vm_name]="${my_config_vm_list[${vm_id}]}"
+    else
       if [ "${my_params[${iso_id}.local_iso_path]}" != "${local_iso_path}" ]
       then
         warning \
@@ -3213,17 +3197,10 @@ function command_upload {
           "" \
           "Please check the configuration, an image with a unique name must be in only one instance"
       fi
-    else
-      my_uploaded_iso_list[${iso_id}]=""
-      my_params[${iso_id}.local_iso_path]="${local_iso_path}"
-      my_params[${iso_id}.esxi_id]="${esxi_id}"
-      my_params[${iso_id}.esxi_datastore]="${esxi_datastore}"
-      # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
-      my_params[${iso_id}.vm_name]="${my_config_vm_list[${vm_id}]}"
     fi
   done
 
-  for iso_id in "${!my_uploaded_iso_list[@]}"
+  for iso_id in "${my_iso_ids_ordered[@]}"
   do
     get_params "${iso_id}"
 
@@ -3286,7 +3263,7 @@ function command_upload {
     fi
 
     # Skip if we have any error on hypervisor
-    [ -n "${esxi_ids[${esxi_id}]}" ] \
+    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
     && continue
 
     progress "Checking the connection to '${esxi_name}' hypervisor (mkdir)"
@@ -3316,7 +3293,7 @@ function command_upload {
       let iso_exists_count+=1
       if [ "${my_options[-ff]}" != "yes" ]
       then
-        my_uploaded_iso_list[${iso_id}]="${COLOR_YELLOW}EXIST${COLOR_NORMAL}"
+        my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST${COLOR_NORMAL}"
         continue
       fi
       iso_exist="yes"
@@ -3346,9 +3323,9 @@ function command_upload {
 
     if [ "${iso_exist}" = "yes" ]
     then
-      my_uploaded_iso_list[${iso_id}]="${COLOR_YELLOW}EXIST/FORCE CHECKED${COLOR_NORMAL}"
+      my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST/FORCE CHECKED${COLOR_NORMAL}"
     else
-      my_uploaded_iso_list[${iso_id}]="${COLOR_GREEN}UPLOADED${COLOR_NORMAL}"
+      my_iso_ids[${iso_id}]="${COLOR_GREEN}UPLOADED${COLOR_NORMAL}"
       let iso_uploaded_count+=1
     fi
   done
@@ -3362,7 +3339,7 @@ function command_upload {
     "\nTotal: %d uploaded, %d already exists (and force checked), %d skipped ISO-images\n" \
     ${iso_uploaded_count} \
     ${iso_exists_count} \
-    $((${#my_uploaded_iso_list[@]}-iso_exists_count-iso_uploaded_count))
+    $((${#my_iso_ids[@]}-iso_exists_count-iso_uploaded_count))
 
   show_remove_failed_cachefiles
 }
