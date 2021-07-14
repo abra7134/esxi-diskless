@@ -88,7 +88,7 @@ declare -A \
   my_options=() \
   my_options_desc=(
     [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
-    [-dt]="Don't trust the .sha1 files (calculate checksums again and compare with .sha1 files)"
+    [-dt]="Don't trust the .sha1 files (calculate checksums for ISO-images again and compare with .sha1 files)"
     [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
     [-ff]="Force check checksums for existed ISO-images on hypervisor"
     [-i]="Do not stop the script if any of hypervisors are not available"
@@ -492,6 +492,38 @@ function get_cachefile_path_for {
       vm_name="${my_real_vm_list[${cachefile_for}]}" \
       vm_esxi_id="${my_params[${cachefile_for}.vm_esxi_id]}"
     echo "${cachefile_basepath}/vm-${vm_esxi_id}-${vm_name}.vmx"
+  fi
+
+  return 0
+}
+
+# Function to getting ${iso_id} and verify status the corresponding ISO-image
+#
+#  Input: ${esxi_id}       - The hypervisor identifier
+#         ${my_iso_ids[@]} - GLOBAL (see description at top)
+#         ${params[@]}     - The array with parameters
+# Modify: ${iso_id}        - The ISO-image identifier
+# Return: 0                - It's alright
+#         1                - Error to getting ${iso_id}
+#                            or there is problem with upload/checking ISO-image
+function get_iso_id {
+  if ! \
+    iso_id=$(
+      get_hash "${esxi_id}-${params[vm_esxi_datastore]}-${params[local_iso_path]}"
+    )
+  then
+    skipping \
+      "Failed to calculate the hash of ISO-image location (sha1sum)"
+    return 1
+  elif [ ! -v my_iso_ids[${iso_id}] ]
+  then
+    internal \
+      "The bad '${iso_id}' value of \${iso_id} (the element don't exist in \${my_iso_ids[\${iso_id}]} array)"
+  elif [[ "${my_params[${iso_id}.status]}" != "ok" ]]
+  then
+    skipping \
+      "Problem with upload/checking the '${params[local_iso_path]}' ISO-image (details see at 'upload status' above)"
+    return 1
   fi
 
   return 0
@@ -934,9 +966,12 @@ function get_real_vm_list {
 # Return: 0                         - The parse complete without errors
 #
 function parse_ini_file {
-  local \
-    config_path="${ESXI_CONFIG_PATH}"
-
+  # Function to check parameter value
+  #
+  # Input:  ${1} - The parameter name
+  #         ${2} - The parameter value
+  # Return: 0    - Parameter value is correct
+  #
   function check_param_value {
     local \
       param="${1}" \
@@ -1023,15 +1058,37 @@ function parse_ini_file {
         "The wrong value of '${param}' parameter: ${error}" \
         "Please fix it and try again"
     fi
+
+    return 0
   }
 
+  # Function-wrapper about 'error' function
+  #
+  # Input: ${@}             - The error message transferred to 'error' function
+  #        ${config_path}   - The path to configuration file
+  #        ${config_lineno} - The current line number readed from configuration file
+  #        ${s}             - The current line readed from configuration file
+  #
   function error_config {
+    if [ -z "${config_path}" ]
+    then
+      internal \
+        "The \${config_path} variable cannot be empty"
+    elif [ -z "${config_lineno}" ]
+    then
+      internal \
+        "The \${config_lineno} variable cannot be empty"
+    fi
+
     error \
       "Configuration file (${config_path}) at line ${config_lineno}:" \
       "> ${s}" \
       "" \
       "${@}"
   }
+
+  local \
+    config_path="${ESXI_CONFIG_PATH}"
 
   if [ ! -s "${config_path}" ]
   then
@@ -1545,9 +1602,10 @@ function prepare_steps {
 
 # The function for removing the cachefiles for specified esxi_id or real_vm_id
 #
-#  Input: ${1} - The esxi_id or real_vm_id for which cachefile will be removed
-#         ${@} - Type of caches if esxi_id specified in ${1}
-# Return: 0    - The cachefile path is returned correctly
+#  Input: ${1}                           - The esxi_id or real_vm_id for which cachefile will be removed
+#         ${@}                           - Type of caches if esxi_id specified in ${1}
+# Modify: ${remove_failed_cachefiles[@]} - Keys - esxi_id or real_vm_id, Values - the remove failed cachefile path
+# Return: 0                              - The cachefile path is returned correctly
 #
 function remove_cachefile_for {
   local \
@@ -1755,61 +1813,17 @@ function run_on_hypervisor {
   return 0
 }
 
-# Function to print the ISO-images upload status
+# Function to print something statuses
 #
-#  Input: ${iso_id}                 - The iso-image identifier
+#  Input: ${1}                      - What type of statuses will be printed
+#                                     ("iso", "vm", "all")
+#         ${iso_id}                 - The identifier of current processed iso-image
+#                                     for cases where the process is interrupted
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
 #         ${my_esxi_ids[@]}         - GLOBAL (see description at top)
 #         ${my_iso_ids[@]}          - GLOBAL (see description at top)
 #         ${my_iso_ids_ordered[@]}  - GLOBAL (see description at top)
-#         ${my_params[@]}           - GLOBAL (see description at top)
-# Return: 0                         - Always
-#
-function show_processed_iso_status {
-  if [ "${#my_iso_ids[@]}" -gt 0 ]
-  then
-    local \
-      aborted_iso_id="${iso_id}"
-
-    echo >&2 -e "${COLOR_NORMAL}"
-    echo >&2 "ISO-images upload status:"
-
-    for iso_id in "${my_iso_ids_ordered[@]}"
-    do
-      esxi_id="${my_params[${iso_id}.esxi_id]}"
-      esxi_name="${my_config_esxi_list[${esxi_id}]}"
-      esxi_datastore="${my_params[${iso_id}.esxi_datastore]}"
-      local_iso_path="${my_params[${iso_id}.local_iso_path]}"
-
-      if [ -z "${my_iso_ids[${iso_id}]}" ]
-      then
-        if [ -n "${my_esxi_ids[${esxi_id}]}" ]
-        then
-          iso_status="${my_esxi_ids[${esxi_id}]}"
-        elif [ "${iso_id}" = "${aborted_iso_id}" ]
-        then
-          iso_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
-        else
-          iso_status="NOT PROCESSED"
-        fi
-      else
-        iso_status="${my_iso_ids[${iso_id}]}"
-      fi
-
-      printf -- \
-      >&2 \
-        "  * %-50b %b\n" \
-        "${COLOR_WHITE}${local_iso_path}${COLOR_NORMAL} -> ${esxi_name}/${esxi_datastore}" \
-        "${iso_status}"
-    done
-  fi
-}
-
-# Function to print the processed virtual machines status
-#
-#  Input: ${my_config_esxi_list[@]} - GLOBAL (see description at top)
-#         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
-#         ${my_esxi_ids[@]}         - GLOBAL (see description at top)
 #         ${my_params[@]}           - GLOBAL (see description at top)
 #         ${my_vm_ids[@]}           - GLOBAL (see description at top)
 #         ${my_vm_ids_ordered[@]}   - GLOBAL (see description at top)
@@ -1817,50 +1831,112 @@ function show_processed_iso_status {
 #                                     for cases where the process is interrupted
 # Return: 0                         - Always
 #
-function show_processed_vm_status {
+function show_processed_status {
   local \
+    status_type="${1}"
+
+  if [[ ! "${status_type}" =~ ^"iso"|"vm"|"all"$ ]]
+  then
+    internal "The first function parameter must have 'iso', 'vm' or 'all' value, but not '${status_type}'"
+  fi
+
+  remove_temp_dir
+
+  local \
+    aborted_iso_id="${iso_id}" \
     aborted_vm_id="${vm_id}"
   local \
     esxi_id="" \
     esxi_name="" \
-    vm_esxi_datastore="" \
-    vm_id="" \
-    vm_name="" \
-    vm_status=""
+    vm_esxi_datastore=""
 
-  if [ "${#my_vm_ids[@]}" -gt 0 ]
-  then
-    echo >&2 -e "${COLOR_NORMAL}"
-    echo >&2 "Virtual machines processing status:"
-    for vm_id in "${my_vm_ids_ordered[@]}"
-    do
-      esxi_id="${my_params[${vm_id}.at]}"
-      esxi_name="${my_config_esxi_list[${esxi_id}]}"
-      vm_esxi_datastore="${my_params[${vm_id}.vm_esxi_datastore]}"
-      vm_name="${my_config_vm_list[${vm_id}]}"
-
-      if [ -z "${my_vm_ids[${vm_id}]}" ]
+  case "${status_type}"
+  in
+    "iso"|"all" )
+      if [ "${#my_iso_ids[@]}" -gt 0 ]
       then
-        if [ -n "${my_esxi_ids[${esxi_id}]}" ]
-        then
-          vm_status="${my_esxi_ids[${esxi_id}]}"
-        elif [ "${vm_id}" = "${aborted_vm_id}" ]
-        then
-          vm_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
-        else
-          vm_status="NOT PROCESSED"
-        fi
-      else
-        vm_status="${my_vm_ids[${vm_id}]}"
-      fi
+        echo >&2 -e "${COLOR_NORMAL}"
+        echo >&2 "ISO-images upload status:"
 
-      printf -- \
-      >&2 \
-        "  * %-50b %b\n" \
-        "${COLOR_WHITE}${vm_name}${COLOR_NORMAL} -> ${esxi_name}/${vm_esxi_datastore}" \
-        "${vm_status}"
-    done
-  fi
+        local \
+          iso_id="" \
+          local_iso_path="" \
+          iso_status=""
+
+        for iso_id in "${my_iso_ids_ordered[@]}"
+        do
+          esxi_id="${my_params[${iso_id}.esxi_id]}"
+          esxi_name="${my_config_esxi_list[${esxi_id}]}"
+          local_iso_path="${my_params[${iso_id}.local_iso_path]}"
+          vm_esxi_datastore="${my_params[${iso_id}.esxi_datastore]}"
+
+          if [ -z "${my_iso_ids[${iso_id}]}" ]
+          then
+            if [ -n "${my_esxi_ids[${esxi_id}]}" ]
+            then
+              iso_status="${my_esxi_ids[${esxi_id}]}"
+            elif [ "${iso_id}" = "${aborted_iso_id}" ]
+            then
+              iso_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
+            else
+              iso_status="NOT PROCESSED"
+            fi
+          else
+            iso_status="${my_iso_ids[${iso_id}]}"
+          fi
+
+          printf -- \
+          >&2 \
+            "  * %-50b %b\n" \
+            "${COLOR_WHITE}${local_iso_path}${COLOR_NORMAL} -> ${esxi_name}/${vm_esxi_datastore}" \
+            "${iso_status}"
+        done
+      fi
+      ;;&
+    "vm"|"all" )
+      if [ "${#my_vm_ids[@]}" -gt 0 ]
+      then
+        echo >&2 -e "${COLOR_NORMAL}"
+        echo >&2 "Virtual machines processing status:"
+
+        local \
+          vm_id="" \
+          vm_name="" \
+          vm_status=""
+
+        for vm_id in "${my_vm_ids_ordered[@]}"
+        do
+          esxi_id="${my_params[${vm_id}.at]}"
+          esxi_name="${my_config_esxi_list[${esxi_id}]}"
+          vm_esxi_datastore="${my_params[${vm_id}.vm_esxi_datastore]}"
+          vm_name="${my_config_vm_list[${vm_id}]}"
+
+          if [ -z "${my_vm_ids[${vm_id}]}" ]
+          then
+            if [ -n "${my_esxi_ids[${esxi_id}]}" ]
+            then
+              vm_status="${my_esxi_ids[${esxi_id}]}"
+            elif [ "${vm_id}" = "${aborted_vm_id}" ]
+            then
+              vm_status="${COLOR_RED}ABORTED${COLOR_NORMAL}"
+            else
+              vm_status="NOT PROCESSED"
+            fi
+          else
+            vm_status="${my_vm_ids[${vm_id}]}"
+          fi
+
+          printf -- \
+          >&2 \
+            "  * %-50b %b\n" \
+            "${COLOR_WHITE}${vm_name}${COLOR_NORMAL} -> ${esxi_name}/${vm_esxi_datastore}" \
+            "${vm_status}"
+        done
+      fi
+      ;;&
+  esac
+
+  show_remove_failed_cachefiles
 
   return 0
 }
@@ -1944,6 +2020,266 @@ function skipping {
   return 0
 }
 
+# Function to upload iso-images to hypervisors
+#
+#  Input: ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${my_vm_ids_ordered[@]}   - GLOBAL (see description at top)
+# Modify: ${my_esxi_ids[@]}         - GLOBAL (see description at top)
+#         ${my_iso_ids[@]}          - GLOBAL (see description at top)
+#         ${my_iso_ids_ordered[@]}  - GLOBAL (see description at top)
+#         ${my_params[@]}           - GLOBAL (see description at top)
+# Return: 0                         - Always
+#
+function upload_isos {
+
+  # Function to read the sha1-sum from the first string in file
+  #
+  #  Input: ${1}     - The path to file from which the sha1-sum will be read
+  # Output: >&1      - The sha1-sum readed from the first string in file
+  # Return: 0        - Always
+  #
+  function read_sha1 {
+    local \
+      sha1sum_str="" \
+      sha1sum_path="${1}"
+
+    if ! \
+      read -r \
+        sha1sum_str \
+      <"${sha1sum_path}"
+    then
+      skipping \
+        "Unable to read the checksum string from '${sha1sum_path}' file"
+      return 1
+    elif [[ ! "${sha1sum_str}" =~ ^([0-9a-f]{40})[[:blank:]]+(.*)$ ]]
+    then
+      skipping \
+        "Unable to parse the checksum string from '${sha1sum_path}' file" \
+        "${sha1sum_str}"
+      return 1
+    else
+      echo "${BASH_REMATCH[1]}"
+    fi
+
+    return 0
+  }
+
+  local -A \
+    params=()
+  local \
+    esxi_datastore="" \
+    esxi_id="" \
+    esxi_iso_dir="" \
+    esxi_iso_path="" \
+    iso_id="" \
+    local_iso_path="" \
+    local_iso_filename="" \
+    vm_id=""
+  local \
+    skipping_type="iso"
+
+  for vm_id in "${my_vm_ids_ordered[@]}"
+  do
+    get_params "${vm_id}"
+
+    esxi_id="${params[at]}"
+    esxi_datastore="${params[vm_esxi_datastore]}"
+    local_iso_path="${params[local_iso_path]}"
+    local_iso_filename="${local_iso_path##*/}"
+
+    if ! \
+      iso_id=$(
+        get_hash "${esxi_id}-${esxi_datastore}-${local_iso_filename}"
+      )
+    then
+      skipping \
+        "Failed to calculate the hash of ISO-image location (sha1sum)"
+      continue
+    fi
+
+    esxi_iso_dir="/vmfs/volumes/${esxi_datastore}/.iso"
+    esxi_iso_path="${esxi_iso_dir}/${local_iso_filename}"
+
+    if [ ! -v my_iso_ids[${iso_id}] ]
+    then
+      my_iso_ids[${iso_id}]=""
+      my_iso_ids_ordered+=(
+        "${iso_id}"
+      )
+      my_params[${iso_id}.local_iso_path]="${local_iso_path}"
+      my_params[${iso_id}.esxi_id]="${esxi_id}"
+      my_params[${iso_id}.esxi_datastore]="${esxi_datastore}"
+      my_params[${iso_id}.esxi_iso_path]="${esxi_iso_path}"
+      my_params[${iso_id}.status]=""
+      # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
+      my_params[${iso_id}.vm_name]="${my_config_vm_list[${vm_id}]}"
+    else
+      if [ "${my_params[${iso_id}.local_iso_path]}" != "${local_iso_path}" ]
+      then
+        warning \
+          "The duplicated ISO-image definition (having the same name but in different locations) finded:" \
+          "1. '${local_iso_path}' ISO-image defined for '${my_config_vm_list[${vm_id}]}' virtual machine" \
+          "2. '${my_params[${iso_id}.local_iso_path]}' ISO-image defined for '${my_params[${iso_id}.vm_name]}' virtual machine" \
+          "" \
+          "Please check the configuration, an image with a unique name must be in only one instance"
+      fi
+    fi
+  done
+
+  local \
+    esxi_name="" \
+    iso_status="" \
+    local_iso_sha1sum="" \
+    local_iso_sha1sum_path="" \
+    real_iso_sha1sum="" \
+    remote_iso_sha1sum=""
+  local \
+    temp_iso_sha1sum_path="${temp_dir}/sha1sum"
+
+  for iso_id in "${my_iso_ids_ordered[@]}"
+  do
+    get_params "${iso_id}"
+
+    esxi_id="${params[esxi_id]}"
+    esxi_name="${my_config_esxi_list[${esxi_id}]}"
+
+    local_iso_path="${params[local_iso_path]}"
+    local_iso_filename="${local_iso_path##*/}"
+    esxi_iso_path="${params[esxi_iso_path]}"
+
+    info "Will upload a '${local_iso_path}' image to '${params[esxi_datastore]}' on '${esxi_name}' hypervisor"
+
+    check_vm_params \
+      local_iso_path \
+    || continue
+
+    local_iso_sha1sum=""
+    local_iso_sha1sum_path="${local_iso_path}.sha1"
+
+    if [ -f "${local_iso_sha1sum_path}" ]
+    then
+      progress "Read the checksum from '${local_iso_sha1sum_path}' file"
+      local_iso_sha1sum=$(
+        read_sha1 \
+          "${local_iso_sha1sum_path}"
+      ) \
+      || continue
+    fi
+
+    if [ -z "${local_iso_sha1sum}" \
+         -o "${my_options[-dt]}" = "yes" ]
+    then
+      progress "Calculate the checksum of ISO-image (sha1sum)"
+      if ! \
+        sha1sum \
+          "${local_iso_path}" \
+        >"${temp_iso_sha1sum_path}"
+      then
+        skipping \
+          "Unable to calculate the checksum of ISO-image (sha1sum)"
+        continue
+      fi
+
+      real_iso_sha1sum=$(
+        read_sha1 \
+          "${temp_iso_sha1sum_path}"
+      ) \
+      || continue
+
+      if [ -z "${local_iso_sha1sum}" ]
+      then
+        local_iso_sha1sum="${real_iso_sha1sum}"
+      elif [ "${local_iso_sha1sum}" != "${real_iso_sha1sum}" ]
+      then
+        skipping \
+          "The calculated checksum of ISO-image don't equal to checksum in .sha1 file"
+        continue
+      fi
+    fi
+
+    # Skip if we have any error on hypervisor
+    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
+    && continue
+
+    progress "Checking the connection to '${esxi_name}' hypervisor (mkdir)"
+    run_on_hypervisor \
+      "${esxi_id}" \
+      "ssh" \
+      "mkdir -p \"${esxi_iso_path%/*}\"" \
+      "|| Failed to create directory for storing ISO-images on hypervisor" \
+    || continue
+
+    progress "Checking existance the ISO-image file on '${esxi_name}' hypervisor (test -f)"
+    if ! \
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "ssh" \
+        "test -f \"${esxi_iso_path}\""
+    then
+      progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "scp" \
+        "${local_iso_path}" \
+        "${esxi_iso_path}" \
+      || continue
+      iso_status="uploaded"
+    else
+      [ "${my_options[-ff]}" = "yes" ] \
+      && iso_status="need check" \
+      || iso_status="exist"
+    fi
+
+    if [ "${iso_status}" = "uploaded" \
+         -o "${iso_status}" = "need check" ]
+    then
+      progress "Calculate the checksum of ISO-image on '${esxi_name}' hypervisor (sha1sum)"
+      run_on_hypervisor \
+      >"${temp_iso_sha1sum_path}" \
+        "${esxi_id}" \
+        "ssh" \
+        "sha1sum \"${esxi_iso_path}\"" \
+        "|| Failed to calculate the checksum of ISO-image (sha1sum)" \
+      || continue
+
+      remote_iso_sha1sum=$(
+        read_sha1 \
+          "${temp_iso_sha1sum_path}"
+      ) \
+      || continue
+
+      if [ "${local_iso_sha1sum}" != "${remote_iso_sha1sum}" ]
+      then
+        skipping \
+          "The calculated checksum of ISO-image on hypervisor don't equal to checksum on this machine"
+        continue
+      fi
+    fi
+
+    case "${iso_status}"
+    in
+      "exist" )
+        echo "    The ISO-image is already exists, skipping"
+        my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST${COLOR_NORMAL}"
+        ;;
+      "need check" )
+        my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST/FORCE CHECKED${COLOR_NORMAL}"
+        ;;
+      "uploaded" )
+        my_iso_ids[${iso_id}]="${COLOR_GREEN}UPLOADED${COLOR_NORMAL}"
+        ;;
+      * )
+        internal \
+          "The bad '${iso_status}' value of \${iso_status} variable"
+        ;;
+    esac
+    my_params[${iso_id}.status]="ok"
+
+  done
+
+  return 0
+}
+
 #
 ### Commands functions
 #
@@ -1956,7 +2292,7 @@ function command_create {
   fi
 
   local \
-    supported_my_options=("-d" "-f" "-i" "-n" "-sn")
+    supported_my_options=("-d" "-dt" "-f" "-ff" "-i" "-n" "-sn")
 
   if [ "${#}" -lt 1 ]
   then
@@ -1970,6 +2306,8 @@ function command_create {
   prepare_steps \
     simple \
     "${@}"
+
+  upload_isos
 
   local -A \
     another_esxi_names=() \
@@ -1985,9 +2323,8 @@ function command_create {
     another_vm_esxi_id="" \
     autostart_param="" \
     esxi_id="" \
-    esxi_iso_dir="" \
-    esxi_iso_path="" \
     esxi_name="" \
+    iso_id="" \
     param="" \
     real_vm_id="" \
     temp_file="" \
@@ -1995,7 +2332,6 @@ function command_create {
     vm_esxi_id="" \
     vm_id="" \
     vm_id_filepath="" \
-    vm_iso_filename="" \
     vm_name="" \
     vm_recreated="" \
     vmx_filepath="" \
@@ -2015,7 +2351,7 @@ function command_create {
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will ${my_options[-f]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) on '${esxi_name}' (${params[esxi_hostname]})"
+    info "Will ${my_options[-f]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
     vm_esxi_id=""
     another_esxi_names=()
@@ -2103,33 +2439,8 @@ function command_create {
       done
     fi
 
-    vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
-    vm_iso_filename="${params[local_iso_path]##*/}"
-    esxi_iso_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso"
-    esxi_iso_path="${esxi_iso_dir}/${vm_iso_filename}"
-
-    progress "Checking existance the ISO image file on '${esxi_name}' hypervisor (test -f)"
-    run_on_hypervisor \
-      "${esxi_id}" \
-      "ssh" \
-      "mkdir -p \"${esxi_iso_dir}\"" \
-      "|| Failed to create directory for storing ISO files on hypervisor" \
+    get_iso_id \
     || continue
-
-    if ! \
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "ssh" \
-        "test -f \"${esxi_iso_path}\""
-    then
-      progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "scp" \
-        "${params[local_iso_path]}" \
-        "${esxi_iso_path}" \
-      || continue
-    fi
 
     vm_recreated=""
     if [ -n "${vm_esxi_id}" \
@@ -2166,7 +2477,7 @@ function command_create {
       [guestinfo.hostname]="${vm_name}"
       [hpet0.present]="TRUE"
       [ide0:0.deviceType]="cdrom-image"
-      [ide0:0.fileName]="${esxi_iso_path}"
+      [ide0:0.fileName]="${my_params[${iso_id}.esxi_iso_path]}"
       [ide0:0.present]="TRUE"
       [ide0:0.startConnected]="TRUE"
       [mem.hotadd]="TRUE"
@@ -2231,6 +2542,7 @@ function command_create {
       "${vmx_filepath}.notsorted" \
     > "${vmx_filepath}"
 
+    vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
     progress "Upload a virtual machine configuration to '${esxi_name}' hypervisor (scp)"
     run_on_hypervisor \
       "${esxi_id}" \
@@ -2421,9 +2733,7 @@ function command_create {
 
   done
 
-  remove_temp_dir
-
-  show_processed_vm_status
+  show_processed_status "all"
 
   printf -- \
   >&2 \
@@ -2432,7 +2742,7 @@ function command_create {
     ${no_pinging_vms} \
     $((${#my_vm_ids[@]}-runned_vms-no_pinging_vms))
 
-  show_remove_failed_cachefiles
+  exit 0
 }
 
 function command_ls {
@@ -2798,6 +3108,8 @@ function command_show {
   echo
   done
 
+  show_remove_failed_cachefiles
+
   printf -- \
     "Total: %d (of %d) hypervisor(s) differences displayed\n" \
     "${#my_esxi_ids[@]}" \
@@ -2827,7 +3139,7 @@ function command_update {
   fi
 
   local \
-    supported_my_options=("-i" "-n" "-sn") \
+    supported_my_options=("-dt" "-ff" "-i" "-n" "-sn") \
     supported_update_params=("local_iso_path")
 
   if [ "${#}" -lt 1 ]
@@ -2860,6 +3172,9 @@ function command_update {
     full \
     "${@}"
 
+  [ "${update_param}" = "local_iso_path" ] \
+  && upload_isos
+
   local -A \
     another_esxi_names=() \
     params=()
@@ -2870,14 +3185,10 @@ function command_update {
     cdrom_type="" \
     cdrom_iso_path="" \
     esxi_id="" \
-    esxi_iso_dir="" \
-    esxi_iso_path="" \
     esxi_name="" \
     real_vm_id="" \
-    vm_esxi_dir="" \
     vm_esxi_id="" \
     vm_id="" \
-    vm_iso_filename="" \
     vm_name="" \
     vm_real_id="" \
     updated_vms=0
@@ -2954,32 +3265,8 @@ function command_update {
       continue
     fi
 
-    vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
-    vm_iso_filename="${params[local_iso_path]##*/}"
-    esxi_iso_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso"
-    esxi_iso_path="${esxi_iso_dir}/${vm_iso_filename}"
-
-    progress "Checking existance the ISO image file on '${esxi_name}' hypervisor (test -f)"
-    if ! \
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "ssh" \
-        "test -f \"${esxi_iso_path}\""
-    then
-      progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "ssh" \
-        "mkdir -p \"${esxi_iso_dir}\"" \
-        "|| Failed to create directory for storing ISO files on hypervisor" \
-      || continue
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "scp" \
-        "${params[local_iso_path]}" \
-        "${esxi_iso_path}" \
-      || continue
-    fi
+    get_iso_id \
+    || continue
 
     progress "Getting the identifier of virtual CD-ROM (govc device.ls cdrom-*)"
 
@@ -3029,7 +3316,7 @@ function command_update {
         -k=true \
         -u="https://${params[esxi_hostname]}" \
         -vm="${vm_name}" \
-        ".iso/${vm_iso_filename}"
+        ".iso/${params[local_iso_path]##*/}"
     then
       skipping \
         "Unable to update the '${update_param}' parameter"
@@ -3064,17 +3351,13 @@ function command_update {
     let updated_vms+=1
   done
 
-  remove_temp_dir
-
-  show_processed_vm_status
+  show_processed_status "all"
 
   printf -- \
   >&2 \
     "\nTotal: %d updated, %d skipped virtual machines\n" \
     ${updated_vms} \
     $((${#my_vm_ids[@]}-updated_vms))
-
-  show_remove_failed_cachefiles
 
   exit 0
 }
@@ -3085,38 +3368,6 @@ function command_upload {
     echo "Upload ISO-images to hypervisors (for faster create virtual machines in future)"
     return 0
   fi
-
-  # Function to read the sha1-sum from the first string in file
-  #
-  #  Input: ${1}     - The path to file from which the sha1-sum will be read
-  # Output: sha1-sum - Readed from the first string in file
-  # Return: 0        - Always
-  #
-  function read_sha1 {
-    local \
-      sha1sum_str="" \
-      sha1sum_path="${1}"
-
-    if ! \
-      read -r \
-        sha1sum_str \
-      <"${sha1sum_path}"
-    then
-      skipping \
-        "Unable to read the checksum string from '${sha1sum_path}' file"
-      return 1
-    elif [[ ! "${sha1sum_str}" =~ ^([0-9a-f]{40})[[:blank:]]+(.*)$ ]]
-    then
-      skipping \
-        "Unable to parse the checksum string from '${sha1sum_path}' file" \
-        "${sha1sum_str}"
-      return 1
-    else
-      echo "${BASH_REMATCH[1]}"
-    fi
-
-    return 0
-  }
 
   local \
     supported_my_options=("-dt" "-ff")
@@ -3134,229 +3385,46 @@ function command_upload {
     simple \
     "${@}"
 
-  local -A \
-    params=()
+  upload_isos
+
+  show_processed_status "iso"
+
   local \
-    esxi_datastore="" \
-    esxi_id="" \
-    esxi_iso_dir="" \
-    esxi_iso_path="" \
-    esxi_name="" \
-    iso_exist="" \
-    iso_exists_count=0 \
     iso_id="" \
-    iso_uploaded_count=0 \
-    local_iso_path="" \
-    local_iso_filename="" \
-    local_iso_sha1sum="" \
-    local_iso_sha1sum_path="" \
-    real_iso_sha1sum="" \
-    remote_iso_sha1sum="" \
-    vm_id=""
-  local \
-    skipping_type="iso" \
-    temp_iso_sha1sum_path="${temp_dir}/sha1sum"
-
-  for vm_id in "${my_vm_ids_ordered[@]}"
-  do
-    get_params "${vm_id}"
-
-    esxi_id="${params[at]}"
-    esxi_datastore="${params[vm_esxi_datastore]}"
-    local_iso_path="${params[local_iso_path]}"
-    local_iso_filename="${local_iso_path##*/}"
-
-    if ! \
-      iso_id=$(
-        get_hash "${esxi_id}-${esxi_datastore}-${local_iso_filename}"
-      )
-    then
-      skipping \
-        "Failed to calculate the hash of ISO-image location (sha1sum)"
-      continue
-    fi
-
-    if [ ! -v my_iso_ids[${iso_id}] ]
-    then
-      my_iso_ids[${iso_id}]=""
-      my_iso_ids_ordered+=(
-        "${iso_id}"
-      )
-      my_params[${iso_id}.local_iso_path]="${local_iso_path}"
-      my_params[${iso_id}.esxi_id]="${esxi_id}"
-      my_params[${iso_id}.esxi_datastore]="${esxi_datastore}"
-      # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
-      my_params[${iso_id}.vm_name]="${my_config_vm_list[${vm_id}]}"
-    else
-      if [ "${my_params[${iso_id}.local_iso_path]}" != "${local_iso_path}" ]
-      then
-        warning \
-          "The duplicated ISO-image definition (having the same name but in different locations) finded:" \
-          "1. '${local_iso_path}' ISO-image defined for '${my_config_vm_list[${vm_id}]}' virtual machine" \
-          "2. '${my_params[${iso_id}.local_iso_path]}' ISO-image defined for '${my_params[${iso_id}.vm_name]}' virtual machine" \
-          "" \
-          "Please check the configuration, an image with a unique name must be in only one instance"
-      fi
-    fi
-  done
+    iso_processed_count=0
 
   for iso_id in "${my_iso_ids_ordered[@]}"
   do
-    get_params "${iso_id}"
-
-    esxi_id="${params[esxi_id]}"
-    esxi_name="${my_config_esxi_list[${esxi_id}]}"
-
-    local_iso_path="${params[local_iso_path]}"
-    local_iso_filename="${local_iso_path##*/}"
-    esxi_iso_dir="/vmfs/volumes/${params[esxi_datastore]}/.iso"
-    esxi_iso_path="${esxi_iso_dir}/${local_iso_filename}"
-
-    info "Will upload a '${local_iso_path}' to '${params[esxi_datastore]}' on '${esxi_name}' hypervisor"
-
-    check_vm_params \
-      local_iso_path \
-    || continue
-
-    local_iso_sha1sum=""
-    local_iso_sha1sum_path="${local_iso_path}.sha1"
-
-    if [ -f "${local_iso_sha1sum_path}" ]
+    if [ "${my_params[${iso_id}.status]}" = "ok" ]
     then
-      progress "Read the checksum from '${local_iso_sha1sum_path}' file"
-      local_iso_sha1sum=$(
-        read_sha1 \
-          "${local_iso_sha1sum_path}"
-      ) \
-      || continue
-    fi
-
-    if [ -z "${local_iso_sha1sum}" \
-         -o "${my_options[-dt]}" = "yes" ]
-    then
-      progress "Calculate the checksum of ISO-image (sha1sum)"
-      if ! \
-        sha1sum \
-          "${local_iso_path}" \
-        >"${temp_iso_sha1sum_path}"
-      then
-        skipping \
-          "Unable to calculate the checksum of ISO-image (sha1sum)"
-        continue
-      fi
-
-      real_iso_sha1sum=$(
-        read_sha1 \
-          "${temp_iso_sha1sum_path}"
-      ) \
-      || continue
-
-      if [ -z "${local_iso_sha1sum}" ]
-      then
-        local_iso_sha1sum="${real_iso_sha1sum}"
-      elif [ "${local_iso_sha1sum}" != "${real_iso_sha1sum}" ]
-      then
-        skipping \
-          "The calculated checksum of ISO-image don't equal to checksum in .sha1 file"
-        continue
-      fi
-    fi
-
-    # Skip if we have any error on hypervisor
-    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
-    && continue
-
-    progress "Checking the connection to '${esxi_name}' hypervisor (mkdir)"
-    run_on_hypervisor \
-      "${esxi_id}" \
-      "ssh" \
-      "mkdir -p \"${esxi_iso_dir}\"" \
-      "|| Failed to create directory for storing ISO-images on hypervisor" \
-    || continue
-
-    iso_exist=""
-    progress "Checking existance the ISO-image file on '${esxi_name}' hypervisor (test -f)"
-    if ! \
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "ssh" \
-        "test -f \"${esxi_iso_path}\""
-    then
-      progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "scp" \
-        "${local_iso_path}" \
-        "${esxi_iso_path}" \
-      || continue
-    else
-      let iso_exists_count+=1
-      if [ "${my_options[-ff]}" != "yes" ]
-      then
-        my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST${COLOR_NORMAL}"
-        continue
-      fi
-      iso_exist="yes"
-    fi
-
-    progress "Calculate the checksum of ISO-image on '${esxi_name}' hypervisor (sha1sum)"
-    run_on_hypervisor \
-    >"${temp_iso_sha1sum_path}" \
-      "${esxi_id}" \
-      "ssh" \
-      "sha1sum \"${esxi_iso_path}\"" \
-      "|| Failed to calculate the checksum of ISO-image (sha1sum)" \
-    || continue
-
-    remote_iso_sha1sum=$(
-      read_sha1 \
-        "${temp_iso_sha1sum_path}"
-    ) \
-    || continue
-
-    if [ "${local_iso_sha1sum}" != "${remote_iso_sha1sum}" ]
-    then
-      skipping \
-        "The calculated checksum of ISO-image on hypervisor don't equal to checksum on this machine"
-      continue
-    fi
-
-    if [ "${iso_exist}" = "yes" ]
-    then
-      my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST/FORCE CHECKED${COLOR_NORMAL}"
-    else
-      my_iso_ids[${iso_id}]="${COLOR_GREEN}UPLOADED${COLOR_NORMAL}"
-      let iso_uploaded_count+=1
+      let iso_processed_count+=1
     fi
   done
 
-  remove_temp_dir
-
-  show_processed_iso_status
-
   printf -- \
   >&2 \
-    "\nTotal: %d uploaded, %d already exists (and force checked), %d skipped ISO-images\n" \
-    ${iso_uploaded_count} \
-    ${iso_exists_count} \
-    $((${#my_iso_ids[@]}-iso_exists_count-iso_uploaded_count))
+    "\nTotal: %d uploaded or already exists (and? force checked), %d skipped ISO-images\n" \
+    ${iso_processed_count} \
+    $((${#my_iso_ids[@]}-iso_processed_count))
 
-  show_remove_failed_cachefiles
+  exit 0
 }
 
 # Trap function for SIGINT
 function trap_sigint {
-  remove_temp_dir
-  if [    "${command_name}" != "ls" \
-       -a "${command_name}" != "show" ]
-  then
-    show_processed_iso_status
-    if [ "${command_name}" != "upload" ]
-    then
-      show_processed_vm_status
-    fi
-  fi
-  show_remove_failed_cachefiles
+  case "${command_name}"
+  in
+    "ls"|"show" )
+      show_remove_failed_cachefiles
+      ;;
+    "upload" )
+      show_processed_status "iso"
+      ;;
+    * )
+      show_processed_status "all"
+      ;;
+  esac
+
   warning "Interrupted"
 }
 
