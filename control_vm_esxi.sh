@@ -88,12 +88,12 @@ declare -A \
   my_options=() \
   my_options_desc=(
     [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
-    [-dt]="Don't trust the .sha1 files (calculate checksums for ISO-images again and compare with .sha1 files)"
     [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
     [-ff]="Force check checksums for existed ISO-images on hypervisor"
     [-i]="Do not stop the script if any of hypervisors are not available"
     [-n]="Skip virtual machine availability check on all hypervisors"
     [-sn]="Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)"
+    [-t]="Trust the .sha1 files (don't recalculate checksums for ISO-images if .sha1 file is readable)"
   )
 
 # ${my_esxi_autostart_params[@]} - The list with supported parameters of autostart manager on ESXi
@@ -1847,6 +1847,7 @@ function run_on_hypervisor {
 #
 #  Input: ${1}                         - What type of statuses will be printed
 #                                        ("all", "iso", "none", "vm")
+#         ${@}                         - Message (in printf format) to print after statuses
 #         ${iso_id}                    - The identifier of current processed iso-image
 #                                        for cases where the process is interrupted
 #         ${my_config_esxi_list[@]}    - GLOBAL (see description at top)
@@ -1865,6 +1866,7 @@ function run_on_hypervisor {
 function show_processed_status {
   local \
     status_type="${1}"
+  shift
 
   if [[ ! "${status_type}" =~ ^"all"|"iso"|"none"|"vm"$ ]]
   then
@@ -1892,8 +1894,8 @@ function show_processed_status {
         echo >&2 "ISO-images upload status:"
 
         local \
-          iso_id="" \
           local_iso_path="" \
+          iso_id="" \
           iso_status=""
 
         for iso_id in "${my_iso_ids_ordered[@]}"
@@ -1968,6 +1970,23 @@ function show_processed_status {
       fi
       ;;&
   esac
+
+  if [ "${#}" -gt 0 ]
+  then
+    printf -- \
+    >&2 \
+      "${@}"
+  fi
+
+  if [    "${my_options[-ff]}" = "yes" \
+       -a "${my_options[-t]}" = "yes" ]
+  then
+    attention \
+      "Wrong information about the correctness of loaded ISO images is possible," \
+      "since '.sha1' files may contain incorrect information" \
+      "" \
+      "For accurate validation of loaded ISO images please do not use the '-ff' and '-t' options together"
+  fi
 
   if [ "${#my_failed_remove_files[@]}" -gt 0 ]
   then
@@ -2198,7 +2217,7 @@ function upload_isos {
     fi
 
     if [ -z "${local_iso_sha1sum}" \
-         -o "${my_options[-dt]}" = "yes" ]
+         -o "${my_options[-t]}" != "yes" ]
     then
       progress "Calculate the checksum of ISO-image (sha1sum)"
       if ! \
@@ -2345,7 +2364,7 @@ function command_create {
   fi
 
   local \
-    supported_my_options=("-d" "-dt" "-f" "-ff" "-i" "-n" "-sn")
+    supported_my_options=("-d" "-f" "-ff" "-i" "-n" "-sn" "-t")
 
   if [ "${#}" -lt 1 ]
   then
@@ -2787,10 +2806,8 @@ function command_create {
 
   done
 
-  show_processed_status "all"
-
-  printf -- \
-  >&2 \
+  show_processed_status \
+    "all" \
     "\nTotal: %d created, %d created but no pinging, %d skipped virtual machines\n" \
     ${runned_vms} \
     ${no_pinging_vms} \
@@ -3162,9 +3179,8 @@ function command_show {
   echo
   done
 
-  show_processed_status "none"
-
-  printf -- \
+  show_processed_status \
+    "none" \
     "Total: %d (of %d) hypervisor(s) differences displayed\n" \
     "${#my_esxi_ids[@]}" \
     "${#my_config_esxi_list[@]}"
@@ -3193,7 +3209,7 @@ function command_update {
   fi
 
   local \
-    supported_my_options=("-dt" "-ff" "-i" "-n" "-sn") \
+    supported_my_options=("-ff" "-i" "-n" "-sn" "-t") \
     supported_update_params=("local_iso_path")
 
   if [ "${#}" -lt 1 ]
@@ -3405,10 +3421,8 @@ function command_update {
     let updated_vms+=1
   done
 
-  show_processed_status "all"
-
-  printf -- \
-  >&2 \
+  show_processed_status \
+    "all" \
     "\nTotal: %d updated, %d skipped virtual machines\n" \
     ${updated_vms} \
     $((${#my_vm_ids[@]}-updated_vms))
@@ -3424,7 +3438,7 @@ function command_upload {
   fi
 
   local \
-    supported_my_options=("-dt" "-ff")
+    supported_my_options=("-ff" "-t")
 
   if [ "${#}" -lt 1 ]
   then
@@ -3441,8 +3455,6 @@ function command_upload {
 
   upload_isos
 
-  show_processed_status "iso"
-
   local \
     iso_id="" \
     iso_processed_count=0
@@ -3455,8 +3467,8 @@ function command_upload {
     fi
   done
 
-  printf -- \
-  >&2 \
+  show_processed_status \
+    "iso" \
     "\nTotal: %d uploaded or already exists (and? force checked), %d skipped ISO-images\n" \
     ${iso_processed_count} \
     $((${#my_iso_ids[@]}-iso_processed_count))
