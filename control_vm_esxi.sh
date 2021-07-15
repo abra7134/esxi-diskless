@@ -2755,6 +2755,8 @@ function command_create {
       my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
 
+    my_vm_ids[${vm_id}]+=" (runned on '${params[local_iso_path]}')"
+
   done
 
   show_processed_status "all"
@@ -3371,7 +3373,7 @@ function command_update {
       "${vm_real_id}" \
       ""
 
-    my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param#special.})"
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param#special.}='${params[${update_param#special.}]}')"
     let updated_vms+=1
   done
 
