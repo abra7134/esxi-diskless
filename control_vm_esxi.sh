@@ -2099,13 +2099,13 @@ function upload_isos {
     iso_id="" \
     local_iso_path="" \
     local_iso_filename="" \
-    vm_id=""
+    temp_vm_id="" # Use another name for correct print 'ABORTED' statuses of virtual machines
   local \
     skipping_type="iso"
 
-  for vm_id in "${my_vm_ids_ordered[@]}"
+  for temp_vm_id in "${my_vm_ids_ordered[@]}"
   do
-    get_params "${vm_id}"
+    get_params "${temp_vm_id}"
 
     esxi_id="${params[at]}"
     esxi_datastore="${params[vm_esxi_datastore]}"
@@ -2137,13 +2137,13 @@ function upload_isos {
       my_params[${iso_id}.esxi_iso_path]="${esxi_iso_path}"
       my_params[${iso_id}.status]=""
       # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
-      my_params[${iso_id}.vm_name]="${my_config_vm_list[${vm_id}]}"
+      my_params[${iso_id}.vm_name]="${my_config_vm_list[${temp_vm_id}]}"
     else
       if [ "${my_params[${iso_id}.local_iso_path]}" != "${local_iso_path}" ]
       then
         warning \
           "The duplicated ISO-image definition (having the same name but in different locations) finded:" \
-          "1. '${local_iso_path}' ISO-image defined for '${my_config_vm_list[${vm_id}]}' virtual machine" \
+          "1. '${local_iso_path}' ISO-image defined for '${my_config_vm_list[${temp_vm_id}]}' virtual machine" \
           "2. '${my_params[${iso_id}.local_iso_path]}' ISO-image defined for '${my_params[${iso_id}.vm_name]}' virtual machine" \
           "" \
           "Please check the configuration, an image with a unique name must be in only one instance"
