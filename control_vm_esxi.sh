@@ -19,17 +19,17 @@ my_name="${0}"
 my_dir="${0%/*}"
 
 # ${my_params[@]}           - Associative array with all parameters from configuration file
-#                             Key - ${id}.${name}
-#                                   ${id} - the resource identifier, the digit "0" is reserved for default settings
-#                                           other resource numbers will be referenced in my_*_list associative arrays
-#                                   ${name} - the parameter name
+#                             Keys - ${id}.${name}
+#                                    ${id} - the resource identifier, the digit "0" is reserved for default settings
+#                                            other resource numbers will be referenced in my_*_list associative arrays
+#                                    ${name} - the parameter name
 # ${my_params_last_id}      - The identifier of last recorded resource
 # ${my_config_esxi_list[@]} - List of esxi hypervisors filled from configuration file
-#                             Key - the hypervisor identifier, value - the hypervisor name
+#                             Keys - the hypervisor identifier, Values - the hypervisor name
 # ${my_config_vm_list[@]}   - List of virtual machines filled from configuration file
-#                             Key - the virtual machine identifier, value - the virtual machine name
+#                             Keys - the virtual machine identifier, Values - the virtual machine name
 # ${my_real_vm_list[@]}     - List of real virtual machines filled from hypervisors
-#                             Key - the real virtual machine identifier, value - the virtual machine name
+#                             Keys - the real virtual machine identifier, Values - the virtual machine name
 #
 # for example:
 #
@@ -81,9 +81,9 @@ declare -A \
   my_real_vm_list=()
 
 # ${my_options[@]}      - Array with options which were specified on the command line
-#                         Key - the command line option name, Value - "yes" string
+#                         Keys - the command line option name, Values - "yes" string
 # ${my_options_desc[@]} - Array with all supported command line options and them descriptions
-#                         Key - the command line option name, Value - the option description
+#                         Keys - the command line option name, Values - the option description
 declare -A \
   my_options=() \
   my_options_desc=(
@@ -97,11 +97,11 @@ declare -A \
   )
 
 # ${my_esxi_autostart_params[@]} - The list with supported parameters of autostart manager on ESXi
-#                                  Key - the paramter name, Value - empty
+#                                  Keys - the paramter name, Values - empty
 # ${my_params_map[@]}            - The map of parameters between configuration file and ESXi VMX file
-#                                  Key - the parameter name in VMX file
+#                                  Keys - the parameter name in VMX file
 #                                        The 'special.' prefix signals that the conversion is not direct
-#                                  Value - the parameter name in configuration file of this script
+#                                  Values - the parameter name in configuration file of this script
 declare -A \
   my_esxi_autostart_params=(
     [enabled]=""
@@ -126,8 +126,8 @@ declare -A \
   )
 
 # ${my_*_ids[@]}         - Arrays with statuses of processed hypervisors, virtual machines or ISO-images
-#                          Key - the resource identifier (esxi_id, vm_id or iso_id)
-#                          Value - the 'SKIPPING' message if the error has occurred
+#                          Keys - the resource identifier (esxi_id, vm_id or iso_id)
+#                          Values - the 'SKIPPING' message if the error has occurred
 # ${my_*_ids_ordered[@]} - The arrays with ordered list of processed hypervisors, virtual machines or ISO-images
 #                          The list of virtual machines ${my_vm_ids_ordered[@]} is ordered according to the order
 #                          in which they are specified on the command line
@@ -140,6 +140,12 @@ declare \
   my_esxi_ids_ordered=() \
   my_iso_ids_ordered=() \
   my_vm_ids_ordered=()
+
+# ${my_failed_remove_files[@]} - The list with failed remove files (mostly used for caсhe files)
+#                                Keys - the failed remove file identifier
+#                                Values - the path of failed remove file
+declare -A \
+  my_failed_remove_files=()
 
 set -o errexit
 set -o errtrace
@@ -638,7 +644,6 @@ function get_real_vm_list {
     vm_vmx_filepath="" \
     vms_map_str="" \
     vms_map_filepath="" \
-    vmx_failed="" \
     vmx_filepath="" \
     vmx_str="" \
     vmx_param_name="" \
@@ -657,13 +662,18 @@ function get_real_vm_list {
         "${esxi_id}" \
         autostart_defaults
     )
-    update_cachefile \
-      "${autostart_defaults_map_filepath}" \
-      "${esxi_id}" \
-      "ssh" \
-      "vim-cmd hostsvc/autostartmanager/get_defaults" \
-      "|| Cannot get the autostart defaults settings (vim-cmd hostsvc/autostartmanager/get_defaults)" \
-    || continue
+    if ! \
+      update_cachefile \
+        "${autostart_defaults_map_filepath}" \
+        "${esxi_id}" \
+        "ssh" \
+        "vim-cmd hostsvc/autostartmanager/get_defaults" \
+        "|| Cannot get the autostart defaults settings (vim-cmd hostsvc/autostartmanager/get_defaults)"
+    then
+      skipping \
+        "Failed to update '${autostart_defaults_map_filepath}' cachefile"
+      continue
+    fi
 
     if [    -f "${autostart_defaults_map_filepath}" \
          -a -s "${autostart_defaults_map_filepath}" ]
@@ -687,14 +697,14 @@ function get_real_vm_list {
           then
             my_params[${esxi_id}.esxi_autostart_${autostart_param_name,,}]="${autostart_param_value}"
           else
-            error \
-              "The unknown '${autostart_param_name}' parameter obtained from hypervisor" \
-              "Let a maintainer know or solve the problem yourself"
+            skipping \
+              "The unknown '${autostart_param_name}' autostart parameter obtained from hypervisor"
+            continue 2
           fi
         else
-          error \
-            "Cannot parse the '${autostart_defaults_map_str}' string obtained from hypervisor" \
-            "Let a maintainer know or solve the problem yourself"
+          skipping \
+            "Cannot parse the '${autostart_defaults_map_str}' autostart string obtained from hypervisor"
+          continue 2
         fi
       done \
       5<"${autostart_defaults_map_filepath}"
@@ -705,13 +715,18 @@ function get_real_vm_list {
         "${esxi_id}" \
         filesystems
     )
-    update_cachefile \
-      "${filesystems_map_filepath}" \
-      "${esxi_id}" \
-      "ssh" \
-      "esxcli storage filesystem list" \
-      "|| Cannot get list of storage filesystems on hypervisor (esxcli storage filesystem list)" \
-    || continue
+    if ! \
+      update_cachefile \
+        "${filesystems_map_filepath}" \
+        "${esxi_id}" \
+        "ssh" \
+        "esxcli storage filesystem list" \
+        "|| Cannot get list of storage filesystems on hypervisor (esxcli storage filesystem list)"
+    then
+      skipping \
+        "Failed to update '${filesystems_map_filepath}' cachefile"
+      continue
+    fi
 
     filesystem_id=0
     filesystem_uuids=()
@@ -728,9 +743,9 @@ function get_real_vm_list {
           continue
         elif [[ ! "${filesystems_map_str}" =~ ^"/vmfs/volumes/"([[:alnum:]_\/\.\-]+)[[:blank:]]+([[:alnum:]_\.\-]*)[[:blank:]]+[[:alnum:]]{8}-[[:alnum:]]{8}-[[:alnum:]]{4}-[[:alnum:]]{12}[[:blank:]]+ ]]
         then
-          error \
-            "Cannot parse the '${filesystems_map_str}' string obtained from hypervisor" \
-            "Let a maintainer know or solve the problem yourself"
+          skipping \
+            "Cannot parse the '${filesystems_map_str}' filesystems string obtained from hypervisor"
+          continue 2
         fi
 
         filesystem_uuid="${BASH_REMATCH[1]}"
@@ -746,21 +761,24 @@ function get_real_vm_list {
       get_cachefile_path_for \
         "${esxi_id}"
     )
-    update_cachefile \
-      "${vms_map_filepath}" \
-      "${esxi_id}" \
-      "ssh" \
-      "type -f awk cat mkdir vim-cmd >/dev/null" \
-      "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
-      "vim-cmd vmsvc/getallvms" \
-      "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)" \
-    || continue
+    if ! \
+      update_cachefile \
+        "${vms_map_filepath}" \
+        "${esxi_id}" \
+        "ssh" \
+        "type -f awk cat mkdir vim-cmd >/dev/null" \
+        "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
+        "vim-cmd vmsvc/getallvms" \
+        "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)"
+    then
+      skipping \
+        "Failed to update '${vms_map_filepath}' cachefile"
+      continue
+    fi
 
     if [    -f "${vms_map_filepath}" \
          -a -s "${vms_map_filepath}" ]
     then
-      vmx_failed=""
-
       while \
         read -r \
           -u 5 \
@@ -771,9 +789,9 @@ function get_real_vm_list {
           continue
         elif [[ ! "${vms_map_str}" =~ ^([[:digit:]]+)[[:blank:]]+([[:alnum:]_\.\-]+)[[:blank:]]+\[([[:alnum:]_\.\-]+)\][[:blank:]]+([[:alnum:]_\/\.\-]+\.vmx)[[:blank:]]+(.*)$ ]]
         then
-          error \
-            "Cannot parse the '${vms_map_str}' string obtained from hypervisor" \
-            "Let a maintainer know or solve the problem yourself"
+          skipping \
+            "Cannot parse the '${vms_map_str}' vms string obtained from hypervisor"
+          continue 2
         fi
 
         vm_esxi_id="${BASH_REMATCH[1]}"
@@ -785,8 +803,7 @@ function get_real_vm_list {
         my_params[${real_vm_id}.vm_esxi_id]="${vm_esxi_id}"
         my_params[${real_vm_id}.at]="${esxi_id}"
 
-        if [    "${get_type}" = "full" \
-             -a "${vmx_failed}" != "yes" ]
+        if [ "${get_type}" = "full" ]
         then
           vm_vmx_filepath="/vmfs/volumes/${BASH_REMATCH[3]}/${BASH_REMATCH[4]}"
           vmx_filepath=$(
@@ -802,8 +819,9 @@ function get_real_vm_list {
               "cat \"${vm_vmx_filepath}\"" \
               "|| Cannot get the VMX file content (cat)"
           then
-            vmx_failed="yes"
-            continue
+            skipping \
+              "Failed to update '${vmx_filepath}' cachefile"
+            continue 2
           fi
 
           if [    -f "${vmx_filepath}" \
@@ -841,15 +859,15 @@ function get_real_vm_list {
                     my_params[${real_vm_id}.special.vm_esxi_datastore]="${filesystem_name}"
                     my_params[${real_vm_id}.special.local_iso_path]="${BASH_REMATCH[3]}"
                   else
-                    error \
-                      "Cannot parse the ISO-image path '${vmx_param_value}' obtained from hypervisor vmx" \
-                      "Let a maintainer know or solve the problem yourself"
+                    skipping \
+                      "Cannot parse the ISO-image path '${vmx_param_value}' obtained from hypervisor"
+                    continue 3
                   fi
                 fi
               else
-                error \
-                  "Cannot parse the '${vmx_str}' string obtained from hypervisor vmx" \
-                  "Let a maintainer know or solve the problem yourself"
+                skipping \
+                  "Cannot parse the '${vmx_str}' vmx string obtained from hypervisor"
+                continue 3
               fi
             done \
             6<"${vmx_filepath}"
@@ -883,13 +901,18 @@ function get_real_vm_list {
           "${esxi_id}" \
           autostart_seq
       )
-      update_cachefile \
-        "${autostart_seq_map_filepath}" \
-        "${esxi_id}" \
-        "ssh" \
-        "vim-cmd hostsvc/autostartmanager/get_autostartseq" \
-        "|| Cannot get the autostart sequence settings (vim-cmd hostsvc/autostartmanager/get_autostartseq)" \
-      || continue
+      if ! \
+        update_cachefile \
+          "${autostart_seq_map_filepath}" \
+          "${esxi_id}" \
+          "ssh" \
+          "vim-cmd hostsvc/autostartmanager/get_autostartseq" \
+          "|| Cannot get the autostart sequence settings (vim-cmd hostsvc/autostartmanager/get_autostartseq)"
+      then
+        skipping \
+          "Failed to update '${autostart_seq_map_filepath}' cachefile"
+        continue
+      fi
 
       if [    -f "${autostart_seq_map_filepath}" \
            -a -s "${autostart_seq_map_filepath}" ]
@@ -930,9 +953,9 @@ function get_real_vm_list {
                 done
                 real_vm_id=""
               else
-                error \
-                  "Cannot parse the 'key' parameter value '${autostart_param_value}' obtained from hypervisor" \
-                  "Let a maintainer know or solve the problem yourself"
+                skipping \
+                  "Cannot parse the 'key' parameter value '${autostart_param_value}' obtained from hypervisor"
+                continue 2
               fi
             else
               if [    "${autostart_param_name}" = "startOrder" \
@@ -1602,15 +1625,16 @@ function prepare_steps {
 
 # The function for removing the cachefiles for specified esxi_id or real_vm_id
 #
-#  Input: ${1}                           - The esxi_id or real_vm_id for which cachefile will be removed
-#         ${@}                           - Type of caches if esxi_id specified in ${1}
-# Modify: ${remove_failed_cachefiles[@]} - Keys - esxi_id or real_vm_id, Values - the remove failed cachefile path
-# Return: 0                              - The cachefile path is returned correctly
+#  Input: ${1}                         - The esxi_id or real_vm_id for which cachefile will be removed
+#         ${@}                         - Type of caches if esxi_id specified in ${1}
+# Modify: ${my_failed_remove_files[@]} - GLOBAL (see description at top)
+# Return: 0                            - The cachefile path is returned correctly
 #
 function remove_cachefile_for {
   local \
     cachefile_for="${1}" \
-    cachefile_path=""
+    cachefile_path="" \
+    cachefile_type=""
   shift
 
   for cachefile_type in "${@}"
@@ -1627,8 +1651,8 @@ function remove_cachefile_for {
       if ! \
         rm "${cachefile_path}"
       then
-        echo "    Failed to remove the cache file \"${cachefile_path}\", skipping"
-        remove_failed_cachefiles[${cachefile_for}]="${cachefile_path}"
+        echo "    SKIPPING"
+        my_failed_remove_files[${cachefile_type}${cachefile_for}]="${cachefile_path}"
       fi
     fi
   done
@@ -1815,29 +1839,30 @@ function run_on_hypervisor {
 
 # Function to print something statuses
 #
-#  Input: ${1}                      - What type of statuses will be printed
-#                                     ("iso", "vm", "all")
-#         ${iso_id}                 - The identifier of current processed iso-image
-#                                     for cases where the process is interrupted
-#         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
-#         ${my_config_vm_list[@]}   - GLOBAL (see description at top)
-#         ${my_esxi_ids[@]}         - GLOBAL (see description at top)
-#         ${my_iso_ids[@]}          - GLOBAL (see description at top)
-#         ${my_iso_ids_ordered[@]}  - GLOBAL (see description at top)
-#         ${my_params[@]}           - GLOBAL (see description at top)
-#         ${my_vm_ids[@]}           - GLOBAL (see description at top)
-#         ${my_vm_ids_ordered[@]}   - GLOBAL (see description at top)
-#         ${vm_id}                  - The identifier the current processed virtual machine
-#                                     for cases where the process is interrupted
-# Return: 0                         - Always
+#  Input: ${1}                         - What type of statuses will be printed
+#                                        ("all", "iso", "none", "vm")
+#         ${iso_id}                    - The identifier of current processed iso-image
+#                                        for cases where the process is interrupted
+#         ${my_config_esxi_list[@]}    - GLOBAL (see description at top)
+#         ${my_config_vm_list[@]}      - GLOBAL (see description at top)
+#         ${my_esxi_ids[@]}            - GLOBAL (see description at top)
+#         ${my_failed_remove_files[@]} - GLOBAL (see description at top)
+#         ${my_iso_ids[@]}             - GLOBAL (see description at top)
+#         ${my_iso_ids_ordered[@]}     - GLOBAL (see description at top)
+#         ${my_params[@]}              - GLOBAL (see description at top)
+#         ${my_vm_ids[@]}              - GLOBAL (see description at top)
+#         ${my_vm_ids_ordered[@]}      - GLOBAL (see description at top)
+#         ${vm_id}                     - The identifier the current processed virtual machine
+#                                        for cases where the process is interrupted
+# Return: 0                            - Always
 #
 function show_processed_status {
   local \
     status_type="${1}"
 
-  if [[ ! "${status_type}" =~ ^"iso"|"vm"|"all"$ ]]
+  if [[ ! "${status_type}" =~ ^"all"|"iso"|"none"|"vm"$ ]]
   then
-    internal "The first function parameter must have 'iso', 'vm' or 'all' value, but not '${status_type}'"
+    internal "The first function parameter must have 'all', 'iso', 'none' or 'vm' value, but not '${status_type}'"
   fi
 
   remove_temp_dir
@@ -1852,6 +1877,8 @@ function show_processed_status {
 
   case "${status_type}"
   in
+    "none" )
+      ;;
     "iso"|"all" )
       if [ "${#my_iso_ids[@]}" -gt 0 ]
       then
@@ -1936,28 +1963,18 @@ function show_processed_status {
       ;;&
   esac
 
-  show_remove_failed_cachefiles
-
-  return 0
-}
-
-# Function to print the remove failed cachefiles
-#
-#  Input: ${remove_failed_cachefiles[@]} - Keys - esxi_id or real_vm_id, Values - the remove failed cachefile path
-# Return: 0                              - Always
-#
-function show_remove_failed_cachefiles {
-  if [ "${#remove_failed_cachefiles[@]}" -gt 0 ]
+  if [ "${#my_failed_remove_files[@]}" -gt 0 ]
   then
     attention \
       "The next cache files failed to remove (see above for details):" \
       "(This files need to be removed ${UNDERLINE}manually${COLOR_NORMAL} for correct script working in future)" \
       "" \
-      "${remove_failed_cachefiles[@]/#/* }"
+      "${my_failed_remove_files[@]/#/* }"
   fi
 
   return 0
 }
+
 
 # Function to print 'SKIPPING' message
 # and writing the 'SKIPPING' message in my_vm_ids[@], my_esxi_ids[@], my_iso_ids[@] arrays
@@ -1975,32 +1992,39 @@ function show_remove_failed_cachefiles {
 #
 function skipping {
   local \
-    skipping_type="${skipping_type:-vm}" \
+    skipping_type="${skipping_type:-vm}"
 
   local \
+    print_skipping="" \
     skipped_prefix="${COLOR_RED}SKIPPED ${skipping_type^^}${COLOR_NORMAL}"
 
   case "${skipping_type}"
   in
     "vm" )
       if [    -n "${vm_id}" \
-           -a -v my_vm_ids[${vm_id}] ]
+           -a -v my_vm_ids[${vm_id}] \
+           -a -z "${my_vm_ids[${vm_id}]}" ]
       then
         my_vm_ids[${vm_id}]="${skipped_prefix}${1:+ (${1})}"
+        print_skipping="yes"
       fi
       ;;
     "esxi" )
       if [    -n "${esxi_id}" \
-           -a -v my_esxi_ids[${esxi_id}] ]
+           -a -v my_esxi_ids[${esxi_id}] \
+           -a -z "${my_esxi_ids[${esxi_id}]}" ]
       then
         my_esxi_ids[${esxi_id}]="${skipped_prefix}${1:+ (${1})}"
+        print_skipping="yes"
       fi
       ;;
     "iso" )
       if [    -n "${iso_id}" \
-           -a -v my_iso_ids[${iso_id}] ]
+           -a -v my_iso_ids[${iso_id}] \
+           -a -z "${my_iso_ids[${iso_id}]}" ]
       then
         my_iso_ids[${iso_id}]="${skipped_prefix}${1:+ (${1})}"
+        print_skipping="yes"
       fi
       ;;
     * )
@@ -2009,7 +2033,8 @@ function skipping {
       ;;
   esac
 
-  if [ -n "${1}" ]
+  if [    "${print_skipping}" = "yes" \
+       -a -n "${1}" ]
   then
     _print \
       "skipping ${skipping_type}" \
@@ -2312,7 +2337,6 @@ function command_create {
   local -A \
     another_esxi_names=() \
     params=() \
-    remove_failed_cachefiles=() \
     vmx_params=()
   local \
     attempts=0 \
@@ -3108,7 +3132,7 @@ function command_show {
   echo
   done
 
-  show_remove_failed_cachefiles
+  show_processed_status "none"
 
   printf -- \
     "Total: %d (of %d) hypervisor(s) differences displayed\n" \
@@ -3415,7 +3439,7 @@ function trap_sigint {
   case "${command_name}"
   in
     "ls"|"show" )
-      show_remove_failed_cachefiles
+      show_processed_status "none"
       ;;
     "upload" )
       show_processed_status "iso"
