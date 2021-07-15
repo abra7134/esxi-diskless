@@ -440,7 +440,7 @@ function esxi_vm_simple_command {
       || [ "${esxi_vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
     do
       echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
-      let attempts-=1
+      let attempts--
     done
   then
     skipping \
@@ -1821,13 +1821,16 @@ function run_on_hypervisor {
     error_code_index="${?}"
     if [ -v error_codes_descriptions[${error_code_index}] ]
     then
-      # Split one line description to array by '|' delimiter
-      IFS="|" \
-      read -r \
-        -a error_description \
-      <<<"${error_codes_descriptions[${error_code_index}]}" \
-      || internal
-      skipping "${error_description[@]}"
+      if [ -n "${error_codes_descriptions[${error_code_index}]}" ]
+      then
+        # Split one line description to array by '|' delimiter
+        IFS="|" \
+        read -r \
+          -a error_description \
+        <<<"${error_codes_descriptions[${error_code_index}]}" \
+        || internal
+        skipping "${error_description[@]}"
+      fi
     else
       internal \
         "The unknown exit error code: ${error_code_index}"
@@ -1979,8 +1982,7 @@ function show_processed_status {
 # Function to print 'SKIPPING' message
 # and writing the 'SKIPPING' message in my_vm_ids[@], my_esxi_ids[@], my_iso_ids[@] arrays
 #
-#  Input: ${1}              - Which array to write the message to (vm, esxi, iso)
-#         ${@}              - The message to print
+#  Input: ${@}              - The message to print
 #         ${iso_id}         - The iso-image identifier
 #         ${esxi_id}        - The hypervisor identifier
 #         ${vm_id}          - The virtual machine identifier
@@ -2152,6 +2154,7 @@ function upload_isos {
   done
 
   local \
+    attempts=0 \
     esxi_name="" \
     iso_status="" \
     local_iso_sha1sum="" \
@@ -2234,49 +2237,71 @@ function upload_isos {
       "|| Failed to create directory for storing ISO-images on hypervisor" \
     || continue
 
+    iso_status="uploaded"
     progress "Checking existance the ISO-image file on '${esxi_name}' hypervisor (test -f)"
-    if ! \
+    if \
       run_on_hypervisor \
         "${esxi_id}" \
         "ssh" \
         "test -f \"${esxi_iso_path}\""
     then
-      progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "scp" \
-        "${local_iso_path}" \
-        "${esxi_iso_path}" \
-      || continue
-      iso_status="uploaded"
-    else
       [ "${my_options[-ff]}" = "yes" ] \
       && iso_status="need check" \
       || iso_status="exist"
     fi
 
-    if [ "${iso_status}" = "uploaded" \
-         -o "${iso_status}" = "need check" ]
+    if [ "${iso_status}" != "exist" ]
     then
-      progress "Calculate the checksum of ISO-image on '${esxi_name}' hypervisor (sha1sum)"
-      run_on_hypervisor \
-      >"${temp_iso_sha1sum_path}" \
-        "${esxi_id}" \
-        "ssh" \
-        "sha1sum \"${esxi_iso_path}\"" \
-        "|| Failed to calculate the checksum of ISO-image (sha1sum)" \
-      || continue
+      let attempts=5
+      while [ ${attempts} -gt 0 ]
+      do
+        if [ "${iso_status}" = "uploaded" ]
+        then
+          progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
+          run_on_hypervisor \
+            "${esxi_id}" \
+            "scp" \
+            "${local_iso_path}" \
+            "${esxi_iso_path}" \
+          || continue 2
+        fi
 
-      remote_iso_sha1sum=$(
-        read_sha1 \
-          "${temp_iso_sha1sum_path}"
-      ) \
-      || continue
+        progress "Calculate the checksum of ISO-image on '${esxi_name}' hypervisor (sha1sum)"
+        run_on_hypervisor \
+        >"${temp_iso_sha1sum_path}" \
+          "${esxi_id}" \
+          "ssh" \
+          "sha1sum \"${esxi_iso_path}\"" \
+          "|| Failed to calculate the checksum of ISO-image (sha1sum)" \
+        || continue 2
 
-      if [ "${local_iso_sha1sum}" != "${remote_iso_sha1sum}" ]
+        remote_iso_sha1sum=$(
+          read_sha1 \
+            "${temp_iso_sha1sum_path}"
+        ) \
+        || continue 2
+
+        [ "${local_iso_sha1sum}" = "${remote_iso_sha1sum}" ] \
+        && break
+
+        if [ "${iso_status}" = "need check" ]
+        then
+          skipping \
+            "The calculated checksum of ISO-image on hypervisor don't equal to checksum on this machine"
+          continue 2
+        fi
+
+        let attempts--
+        if [ ${attempts} -gt 0 ]
+        then
+          echo "    The checksum of uploaded ISO-image on hypervisor is not correct, try upload again (${attempts} attempts left)"
+        fi
+      done
+
+      if [ ${attempts} -lt 1 ]
       then
         skipping \
-          "The calculated checksum of ISO-image on hypervisor don't equal to checksum on this machine"
+          "Failed to correct upload the ISO-image to hypervisor, checksums did not match several times"
         continue
       fi
     fi
@@ -2679,7 +2704,7 @@ function command_create {
         || ping_host "${params[vm_ipv4_address]}"
       do
         echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
-        let attempts-=1
+        let attempts--
       done
     then
       skipping \
