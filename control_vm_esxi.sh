@@ -1215,6 +1215,11 @@ function parse_ini_file {
         error_config \
           "The INI-resource must not start with a '-' character as it is used to specify options" \
           "Please correct the name and try again"
+      elif [ "${config_resource_name}" = "all" ]
+      then
+        error_config \
+          "The 'all' word is reserved and cannot used as the INI-resource" \
+          "Please correct the name and try again"
       else
         let my_params_last_id+=1
         case "${section_name}"
@@ -1450,6 +1455,19 @@ function parse_args_list {
       fi
     fi
 
+    if [ "${arg_name}" = "all" ]
+    then
+      if [    "${command_name}" = "ls" \
+           -o "${command_name}" = "upload" ]
+      then
+        parse_args_list "${my_config_esxi_list[@]}"
+        continue
+      else
+        warning \
+          "The 'all' word can be specified in command line for 'ls' or 'upload' commands only, not for '${command_name}'"
+      fi
+    fi
+
     for vm_id in "${!my_config_vm_list[@]}"
     do
       vm_name="${my_config_vm_list[${vm_id}]}"
@@ -1578,16 +1596,8 @@ function prepare_steps {
   shift
   parse_args_list "${@}"
 
-  # And for command 'ls' parse again with all virtual machines
-  # if the previous step return the empty list
-  if [ "${command_name}" = "ls" ]
+  if [ "${command_name}" != "ls" ]
   then
-    if [    "${#my_vm_ids[@]}" -lt 1 \
-         -a "${#my_esxi_ids[@]}" -lt 1 ]
-    then
-      parse_args_list "${my_config_esxi_list[@]}"
-    fi
-  else
     create_temp_dir
 
     if [ "${command_name}" != "upload" ]
@@ -2826,6 +2836,16 @@ function command_ls {
   local \
     supported_my_options=("-n")
 
+  if [ "${#}" -lt 1 ]
+  then
+    show_usage \
+      "Please specify a virtual machine name or names for which the configuration will be listed" \
+      "You can also specify hypervisor names on which for all virtual machines configurations will be listed" \
+      "" \
+      "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
+      "   or: ${my_name} ${command_name} [options] all"
+  fi
+
   prepare_steps \
     simple \
     "${@}"
@@ -3446,7 +3466,8 @@ function command_upload {
       "Please specify a virtual machine name or names for which the ISO images will be upload" \
       "You can also specify hypervisor names on which for all virtual machines ISO images will be upload" \
       "" \
-      "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..."
+      "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
+      "   or: ${my_name} ${command_name} [options] all"
   fi
 
   prepare_steps \

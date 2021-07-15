@@ -525,10 +525,13 @@ function show_usage {
     fi
   done
 
-  usage_message+=(
-    ""
-    "Available names can be viewed using the '${my_name} ls' command"
-  )
+  if [ "${command_name}" != "ls" ]
+  then
+    usage_message+=(
+      ""
+      "Available names can be viewed using the '${my_name} ls' command"
+    )
+  fi
 
   warning "${usage_message[@]}"
 }
