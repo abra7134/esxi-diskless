@@ -576,18 +576,20 @@ function get_real_vm_list {
             "${cachefile_path}"
         )
       then
-        warning \
+        skipping \
           "Cannot get the status of cache file '${cachefile_path}'" \
           "Please check file permissions or just remove this file and try again"
+        return 1
       fi
 
       if [ $((`printf "%(%s)T"`-cachefile_mtime)) -ge "${CACHE_VALID}" ]
       then
         if ! rm "${cachefile_path}"
         then
-          warning \
+          skipping \
             "Cannot the remove the old cache file '${cachefile_path}'" \
             "Please check file permissions or just remove this file and try again"
+          return 1
         fi
       fi
     fi
@@ -606,9 +608,10 @@ function get_real_vm_list {
           --parents \
           "${cachefile_dir}"
       then
-        warning \
+        skipping \
           "Failed to create directory '${cachefile_dir}' for saving cache files" \
           "Please check file permissions or just remove this file and try again"
+        return 1
       fi
 
       run_on_hypervisor \
