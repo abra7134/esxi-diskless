@@ -947,6 +947,20 @@ EOF
       continue
     fi
 
+    progress "Calculate the checksum of ISO-image (sha1sum)"
+    pushd "${image_path%/*}" >/dev/null
+    if ! \
+      sha1sum \
+        "${image_path##*/}" \
+      >"${image_path##*/}.sha1"
+    then
+      popd >/dev/null
+      skipping \
+        "Unable to calculate the checksum of ISO-image (sha1sum)"
+      continue
+    fi
+    popd >/dev/null
+
     my_builds_ids[${build_id}]="${COLOR_GREEN}BUILDED${COLOR_NORMAL} (${image_path})"
     let builded_images+=1
 
