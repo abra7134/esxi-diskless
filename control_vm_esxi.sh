@@ -1759,11 +1759,14 @@ function run_on_hypervisor {
     [4]="Unrecognized response from ssh (parse error)"
     [5]="Invalid/incorrect ssh password"
     [6]="Host public key is unknown. sshpass exits without confirming the new key"
-    [255]="Unable to establish SSH-connection"
+    [255]="Unable to establish SSH-connection to hypervisor"
   )
   error_description=()
-  # Use first free index from ${error_codes_descriptions[@]}
-  error_code_index=9
+  # Free index range from prefilled ${error_code_descriptions[@]}
+  error_code_index_min=10
+  error_code_index_max=250
+  # Use first free index
+  error_code_index="${error_code_index_min}"
   # Predefine ssh parameters with port and username
   ssh_params=(
     "-o Port=${params[esxi_ssh_port]}"
@@ -1842,7 +1845,14 @@ function run_on_hypervisor {
           -a error_description \
         <<<"${error_codes_descriptions[${error_code_index}]}" \
         || internal
-        skipping "${error_description[@]}"
+        if [    "${error_code_index}" -ge "${error_code_index_min}" \
+             -a "${error_code_index}" -le "${error_code_index_max}" ]
+        then
+          skipping "${error_description[@]}"
+        else
+          skipping_type="esxi" \
+          skipping "${error_description[@]}"
+        fi
       fi
     else
       internal \
@@ -2036,7 +2046,6 @@ function skipping {
   in
     "vm" )
       if [    -n "${vm_id}" \
-           -a -v my_vm_ids[${vm_id}] \
            -a -z "${my_vm_ids[${vm_id}]}" ]
       then
         my_vm_ids[${vm_id}]="${skipped_prefix}${1:+ (${1})}"
@@ -2045,7 +2054,6 @@ function skipping {
       ;;
     "esxi" )
       if [    -n "${esxi_id}" \
-           -a -v my_esxi_ids[${esxi_id}] \
            -a -z "${my_esxi_ids[${esxi_id}]}" ]
       then
         my_esxi_ids[${esxi_id}]="${skipped_prefix}${1:+ (${1})}"
@@ -2054,7 +2062,6 @@ function skipping {
       ;;
     "iso" )
       if [    -n "${iso_id}" \
-           -a -v my_iso_ids[${iso_id}] \
            -a -z "${my_iso_ids[${iso_id}]}" ]
       then
         my_iso_ids[${iso_id}]="${skipped_prefix}${1:+ (${1})}"
@@ -2192,7 +2199,8 @@ function upload_isos {
     local_iso_sha1sum="" \
     local_iso_sha1sum_path="" \
     real_iso_sha1sum="" \
-    remote_iso_sha1sum=""
+    remote_iso_sha1sum="" \
+    temp_iso_id=""
   local \
     temp_iso_sha1sum_path="${temp_dir}/sha1sum"
 
@@ -2202,6 +2210,10 @@ function upload_isos {
 
     esxi_id="${params[esxi_id]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
+
+    # Skip if we have any error on hypervisor
+    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
+    && continue
 
     local_iso_path="${params[local_iso_path]}"
     local_iso_filename="${local_iso_path##*/}"
@@ -2213,17 +2225,33 @@ function upload_isos {
       local_iso_path \
     || continue
 
+    for temp_iso_id in "${my_iso_ids_ordered[@]}"
+    do
+      if [    "${temp_iso_id}" != "${iso_id}" \
+           -a "${my_params[${temp_iso_id}.local_iso_path]}" = "${local_iso_path}" \
+           -a "${my_params[${temp_iso_id}.status]}" = "iso problem" ]
+      then
+        skipping \
+          "Problem with upload/checking the ISO-image (see details above ^^^)"
+        continue 2
+      fi
+    done
+
     local_iso_sha1sum=""
     local_iso_sha1sum_path="${local_iso_path}.sha1"
 
     if [ -f "${local_iso_sha1sum_path}" ]
     then
       progress "Read the checksum from '${local_iso_sha1sum_path}' file"
-      local_iso_sha1sum=$(
-        read_sha1 \
-          "${local_iso_sha1sum_path}"
-      ) \
-      || continue
+      if ! \
+        local_iso_sha1sum=$(
+          read_sha1 \
+            "${local_iso_sha1sum_path}"
+        )
+      then
+        my_params[${iso_id}.status]="iso problem"
+        continue
+      fi
     fi
 
     if [ -z "${local_iso_sha1sum}" \
@@ -2237,6 +2265,7 @@ function upload_isos {
       then
         skipping \
           "Unable to calculate the checksum of ISO-image (sha1sum)"
+        my_params[${iso_id}.status]="iso problem"
         continue
       fi
 
@@ -2253,13 +2282,10 @@ function upload_isos {
       then
         skipping \
           "The calculated checksum of ISO-image don't equal to checksum in .sha1 file"
+        my_params[${iso_id}.status]="iso problem"
         continue
       fi
     fi
-
-    # Skip if we have any error on hypervisor
-    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
-    && continue
 
     progress "Checking the connection to '${esxi_name}' hypervisor (mkdir)"
     run_on_hypervisor \
