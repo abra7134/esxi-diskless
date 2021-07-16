@@ -6,7 +6,7 @@
 MY_DEPENDENCIES=("cat" "cp" "find" "git" "mkisofs")
 MY_NAME="Script for building ISO-images from templates"
 MY_VARIABLES=("BUILD_CONFIG_PATH" "BUILD_OUTPUT_DIR")
-MY_VERSION="2.210616"
+MY_VERSION="2.210716"
 
 # The configuration file path
 BUILD_CONFIG_PATH="${BUILD_CONFIG_PATH:-"${0%.sh}.ini"}"
