@@ -503,9 +503,11 @@ function get_cachefile_path_for {
   return 0
 }
 
-# Function to getting ${iso_id} and verify status the corresponding ISO-image
+# Function to getting ${iso_id} and? verify status of the corresponding ISO-image
 #
-#  Input: ${esxi_id}       - The hypervisor identifier
+#  Input: ${1}             - Verify or not the status of the corresponding ISO-image
+#                            Possible values: without_check, no, or anything
+#         ${esxi_id}       - The hypervisor identifier
 #         ${my_iso_ids[@]} - GLOBAL (see description at top)
 #         ${params[@]}     - The array with parameters
 # Modify: ${iso_id}        - The ISO-image identifier
@@ -513,23 +515,32 @@ function get_cachefile_path_for {
 #         1                - Error to getting ${iso_id}
 #                            or there is problem with upload/checking ISO-image
 function get_iso_id {
+  local \
+    check_type="${1}"
+
   if ! \
     iso_id=$(
-      get_hash "${esxi_id}-${params[vm_esxi_datastore]}-${params[local_iso_path]}"
+      get_hash "${esxi_id}-${params[vm_esxi_datastore]}-${params[local_iso_path]##*/}"
     )
   then
     skipping \
       "Failed to calculate the hash of ISO-image location (sha1sum)"
     return 1
-  elif [ ! -v my_iso_ids[${iso_id}] ]
+  fi
+
+  if [    "${check_type}" != "without_check" \
+       -a "${check_type}" != "no" ]
   then
-    internal \
-      "The bad '${iso_id}' value of \${iso_id} (the element don't exist in \${my_iso_ids[\${iso_id}]} array)"
-  elif [[ "${my_params[${iso_id}.status]}" != "ok" ]]
-  then
-    skipping \
-      "Problem with upload/checking the '${params[local_iso_path]}' ISO-image (details see at 'upload status' above)"
-    return 1
+    if [ ! -v my_iso_ids[${iso_id}] ]
+    then
+      internal \
+        "The bad '${iso_id}' value of \${iso_id} (the element don't exist in \${my_iso_ids[@]} array)"
+    elif [[ "${my_params[${iso_id}.status]}" != "ok" ]]
+    then
+      skipping \
+        "Problem with upload/checking the '${params[local_iso_path]}' ISO-image (details see at 'upload status' above)"
+      return 1
+    fi
   fi
 
   return 0
@@ -2133,13 +2144,10 @@ function upload_isos {
   local -A \
     params=()
   local \
-    esxi_datastore="" \
     esxi_id="" \
-    esxi_iso_dir="" \
     esxi_iso_path="" \
     iso_id="" \
     local_iso_path="" \
-    local_iso_filename="" \
     temp_vm_id="" # Use another name for correct print 'ABORTED' statuses of virtual machines
   local \
     skipping_type="iso"
@@ -2149,32 +2157,23 @@ function upload_isos {
     get_params "${temp_vm_id}"
 
     esxi_id="${params[at]}"
-    esxi_datastore="${params[vm_esxi_datastore]}"
-    local_iso_path="${params[local_iso_path]}"
-    local_iso_filename="${local_iso_path##*/}"
 
-    if ! \
-      iso_id=$(
-        get_hash "${esxi_id}-${esxi_datastore}-${local_iso_filename}"
-      )
-    then
-      skipping \
-        "Failed to calculate the hash of ISO-image location (sha1sum)"
-      continue
-    fi
-
-    esxi_iso_dir="/vmfs/volumes/${esxi_datastore}/.iso"
-    esxi_iso_path="${esxi_iso_dir}/${local_iso_filename}"
+    get_iso_id \
+      without_check \
+    || continue
 
     if [ ! -v my_iso_ids[${iso_id}] ]
     then
+      local_iso_path="${params[local_iso_path]}"
+      esxi_iso_path="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso/${local_iso_path##*/}"
+
       my_iso_ids[${iso_id}]=""
       my_iso_ids_ordered+=(
         "${iso_id}"
       )
       my_params[${iso_id}.local_iso_path]="${local_iso_path}"
       my_params[${iso_id}.esxi_id]="${esxi_id}"
-      my_params[${iso_id}.esxi_datastore]="${esxi_datastore}"
+      my_params[${iso_id}.esxi_datastore]="${params[vm_esxi_datastore]}"
       my_params[${iso_id}.esxi_iso_path]="${esxi_iso_path}"
       my_params[${iso_id}.status]=""
       # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
@@ -2216,7 +2215,6 @@ function upload_isos {
     && continue
 
     local_iso_path="${params[local_iso_path]}"
-    local_iso_filename="${local_iso_path##*/}"
     esxi_iso_path="${params[esxi_iso_path]}"
 
     info "Will upload a '${local_iso_path}' image to '${params[esxi_datastore]}' on '${esxi_name}' hypervisor"
