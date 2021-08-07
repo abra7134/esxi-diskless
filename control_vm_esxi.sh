@@ -553,7 +553,8 @@ function get_iso_id {
 #         ${temp_dir}           - The temporary directory to save cache files if CACHE_DIR="-"
 #         ${CACHE_DIR}          - GLOBAL (see description at top)
 #         ${CACHE_VALID}        - GLOBAL (see description at top)
-# Modify: ${my_params[@]}       - GLOBAL (see description at top)
+# Modify: ${my_options[@]}      - GLOBAL (see description at top)
+#         ${my_params[@]}       - GLOBAL (see description at top)
 #         ${my_params_last_id}  - GLOBAL (see description at top)
 #         ${my_real_vm_list[@]} - GLOBAL (see description at top)
 # Return: 0                     - The retrieving information is complete successful
@@ -634,6 +635,29 @@ function get_real_vm_list {
     return 0
   }
 
+  # Function to checking the skipiing options ('-n' and '-i')
+  #
+  # Modify: ${my_options[@]} - GLOBAL (see description at top)
+  # Return: 0                - The retrieving information is complete successful
+  #
+  function check_skip_options {
+    if [ "${my_options[-n]}" != "yes" ]
+    then
+      if [ "${my_options[-i]}" = "yes" ]
+      then
+        my_options[unavailable_presence]="yes"
+      else
+        warning \
+          "The hypervisor '${esxi_name}' not available now," \
+          "therefore, it's not possible to build a virtual machines map on all hypervisors" \
+          "" \
+          "Add '-i' option if you can ignore unavailable hypervisors"
+      fi
+    fi
+
+    return 0
+  }
+
   local -A \
     filesystems_uuids=() \
     filesystems_names=() \
@@ -686,6 +710,7 @@ function get_real_vm_list {
     then
       skipping \
         "Failed to update '${autostart_defaults_map_filepath}' cachefile"
+      check_skip_options
       continue
     fi
 
@@ -739,6 +764,7 @@ function get_real_vm_list {
     then
       skipping \
         "Failed to update '${filesystems_map_filepath}' cachefile"
+      check_skip_options
       continue
     fi
 
@@ -787,6 +813,7 @@ function get_real_vm_list {
     then
       skipping \
         "Failed to update '${vms_map_filepath}' cachefile"
+      check_skip_options
       continue
     fi
 
@@ -835,6 +862,7 @@ function get_real_vm_list {
           then
             skipping \
               "Failed to update '${vmx_filepath}' cachefile"
+            check_skip_options
             continue 2
           fi
 
@@ -889,23 +917,6 @@ function get_real_vm_list {
         fi
       done \
       5<"${vms_map_filepath}"
-    else
-      if [ "${my_options[-n]}" = "yes" ]
-      then
-        continue
-      else
-        if [ "${my_options[-i]}" = "yes" ]
-        then
-          my_options[unavailable_presence]="yes"
-          continue
-        else
-          warning \
-            "The hypervisor '${esxi_name}' not available now," \
-            "therefore, it's not possible to build a virtual machines map on all hypervisors" \
-            "" \
-            "Add '-i' option if you can ignore unavailable hypervisors"
-        fi
-      fi
     fi
 
     if [ "${get_type}" = "full" ]
@@ -925,6 +936,7 @@ function get_real_vm_list {
       then
         skipping \
           "Failed to update '${autostart_seq_map_filepath}' cachefile"
+        check_skip_options
         continue
       fi
 
