@@ -3008,15 +3008,16 @@ function command_create {
 
     progress "Waiting the network availability of the virtual machine (ping)"
     let attempts=10
-    if ! \
-      until
-        sleep 5;
-        [ ${attempts} -lt 1 ] \
-        || ping_host "${params[vm_ipv4_address]}"
-      do
-        echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
-        let attempts--
-      done
+    until
+      sleep 5;
+      [ "${attempts}" -lt 1 ] \
+      || ping_host "${params[vm_ipv4_address]}"
+    do
+      echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
+      let attempts--
+    done
+
+    if [ "${attempts}" -lt 1 ]
     then
       skipping \
         "No connectivity to virtual machine" \
