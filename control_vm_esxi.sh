@@ -324,8 +324,7 @@ function check_vm_params {
 # Function to run simple operation on virtual machine
 #
 # Input:  ${1}                      - The virtual machine operation: 'destroy', 'power on', 'power off' or 'power shutdown'
-#         ${2}                      - The virtual machine identified on hypervisor
-#         ${3}                      - The hypervisor identifier at ${my_config_esxi_list} array
+#         ${2}                      - The virtual machine identifier at ${my_real_vm_list[@]} array
 #         ${temp_dir}               - The temporary directory to save commands outputs
 #         ${my_params[@]}           - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
@@ -403,67 +402,69 @@ function esxi_vm_simple_command {
   }
 
   local \
-    esxi_vm_operation="${1}" \
-    vm_esxi_id="${2}" \
-    esxi_id="${3}"
+    vm_operation="${1}" \
+    real_vm_id="${2}"
 
-  if [    "${esxi_vm_operation}" != "destroy" \
-       -a "${esxi_vm_operation}" != "power on" \
-       -a "${esxi_vm_operation}" != "power off" \
-       -a "${esxi_vm_operation}" != "power shutdown" ]
+  if [    "${vm_operation}" != "destroy" \
+       -a "${vm_operation}" != "power on" \
+       -a "${vm_operation}" != "power off" \
+       -a "${vm_operation}" != "power shutdown" ]
   then
     internal \
-      "The \${esxi_vm_operation} must be 'destroy', 'power on', 'power off' or 'power shutdown', but not '${esxi_vm_operation}'"
-  elif [ ! -v my_config_esxi_list[${esxi_id}] ]
+      "The \${vm_operation} must be 'destroy', 'power on', 'power off' or 'power shutdown', but not '${vm_operation}'"
+  elif [ ! -v my_real_vm_list[${real_vm_id}] ]
   then
     internal \
-      "For hypervisor with \${esxi_id} = '${esxi_id}' don't exists at \${my_config_esxi_list} array"
+      "For virtual machine with \${real_vm_id} = '${real_vm_id}' don't exists at \${my_real_vm_list[@]} array"
   fi
 
   local \
-    esxi_name="" \
+    esxi_id="${my_params[${real_vm_id}.at]}"
+  local \
+    esxi_name="${my_config_esxi_list[${esxi_id}]}" \
+    vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}" \
     vm_state_filepath="${temp_dir}/vm_state" \
     vm_state=""
 
-  esxi_name="${my_config_esxi_list[${esxi_id}]}"
-
-  progress "${esxi_vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})"
+  progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
 
   esxi_get_vm_state \
   || return 1
 
-  if [ "${vm_state}" = "Absent" ]
+  if [ "${vm_state}" = "Powered on" ]
   then
-    skipping \
-      "Can't ${esxi_vm_operation} a virtual machine because it's absent on hypervisor"
-    return 1
-  elif [ "${vm_state}" = "Powered on" ]
-  then
-    if [ "${esxi_vm_operation}" = "power on" ]
+    if [ "${vm_operation}" = "power on" ]
     then
       echo "    The virtual machine is already powered on, skipping"
       return 0
-    elif [ "${esxi_vm_operation}" = "destroy" ]
+    elif [ "${vm_operation}" = "destroy" ]
     then
-      skipping \
-        "Can't destoy a virtual machine because it's powered on"
-      return 1
+      esxi_vm_simple_command \
+        "power shutdown" \
+        "${real_vm_id}" \
+      || return 1
     fi
-  elif [    "${esxi_vm_operation}" = "power off" \
-         -o "${esxi_vm_operation}" = "power shutdown" ]
+  elif [    "${vm_operation}" = "power off" \
+         -o "${vm_operation}" = "power shutdown" ]
   then
     echo "    The virtual machine is already powered off, skipping"
     return 0
   fi
 
-  run_on_hypervisor \
-    "${esxi_id}" \
-    "ssh" \
-    "vim-cmd vmsvc/${esxi_vm_operation// /.} \"${vm_esxi_id}\" >/dev/null" \
-    "|| Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${esxi_vm_operation// /.})" \
-  || return 1
+  if [ "${vm_state}" != "Absent" ]
+  then
+    run_on_hypervisor \
+      "${esxi_id}" \
+      "ssh" \
+      "vim-cmd vmsvc/${vm_operation// /.} \"${vm_esxi_id}\" >/dev/null" \
+      "|| Failed to ${vm_operation} machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})" \
+    || return 1
+  else
+    echo "    Skipping ${vm_operation} because a virtual machine is absent on hypervisor"
+    echo "    Probably the cache is out of date..."
+  fi
 
-  if [ "${esxi_vm_operation}" = "destroy" ]
+  if [ "${vm_operation}" = "destroy" ]
   then
     remove_cachefile_for \
       "${esxi_id}" \
@@ -482,21 +483,21 @@ function esxi_vm_simple_command {
       esxi_get_vm_state \
       || return 1;
       [ ${attempts} -lt 1 ] \
-      || [ "${esxi_vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
-      || [ "${esxi_vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
-      || [ "${esxi_vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
-      || [ "${esxi_vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
+      || [ "${vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
+      || [ "${vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
+      || [ "${vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
+      || [ "${vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
     do
       echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
       let attempts--
     done
   then
     skipping \
-      "Failed to ${esxi_vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
+      "Failed to ${vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
     return 1
   fi
 
-  echo "    The virtual machine is ${esxi_vm_operation}'ed, continue"
+  echo "    The virtual machine is ${vm_operation}'ed, continue"
 
   return 0
 }
@@ -2680,7 +2681,7 @@ function command_create {
     runned_vms=0
   local \
     another_esxi_id="" \
-    another_vm_esxi_id="" \
+    another_vm_real_id="" \
     autostart_param="" \
     esxi_id="" \
     esxi_name="" \
@@ -2693,6 +2694,7 @@ function command_create {
     vm_id="" \
     vm_id_filepath="" \
     vm_name="" \
+    vm_real_id="" \
     vm_recreated="" \
     vmx_filepath="" \
     vmx_params=""
@@ -2713,7 +2715,7 @@ function command_create {
 
     info "Will ${my_options[-f]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
-    vm_esxi_id=""
+    vm_real_id=""
     another_esxi_names=()
     # Preparing the esxi list where the virtual machine is located
     for real_vm_id in "${!my_real_vm_list[@]}"
@@ -2722,25 +2724,25 @@ function command_create {
       then
         if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
         then
-          if [ -n "${vm_esxi_id}" ]
+          if [ -n "${vm_real_id}" ]
           then
             skipping \
               "Found multiple virtual machines with the same name on hypervisor" \
-              "with '${vm_esxi_id}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+              "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
               "Please check it manually and rename the one of the virtual machine"
             continue 2
           fi
-          vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}"
+          vm_real_id="${real_vm_id}"
         else
           another_esxi_id="${my_params[${real_vm_id}.at]}"
           another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_params[${another_esxi_id}.esxi_hostname]})"
-          another_vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}"
+          another_vm_real_id="${real_vm_id}"
         fi
       fi
     done
 
     # Checking existance the virtual machine on another or this hypervisors
-    if [ -n "${vm_esxi_id}" \
+    if [ -n "${vm_real_id}" \
          -a "${my_options[-f]}" != "yes" ]
     then
       skipping \
@@ -2803,18 +2805,12 @@ function command_create {
     || continue
 
     vm_recreated=""
-    if [ -n "${vm_esxi_id}" \
+    if [ -n "${vm_real_id}" \
          -a "${my_options[-f]}" = "yes" ]
     then
       esxi_vm_simple_command \
-        "power shutdown" \
-        "${vm_esxi_id}" \
-        "${esxi_id}" \
-      || continue
-      esxi_vm_simple_command \
         "destroy" \
-        "${vm_esxi_id}" \
-        "${esxi_id}" \
+        "${vm_real_id}" \
       || continue
 
       vm_recreated="yes"
@@ -2980,24 +2976,21 @@ function command_create {
     then
       esxi_vm_simple_command \
         "power shutdown" \
-        "${another_vm_esxi_id}" \
-        "${another_esxi_id}" \
+        "${another_vm_real_id}" \
       || continue
     fi
 
     if ! \
       esxi_vm_simple_command \
         "power on" \
-        "${vm_esxi_id}" \
-        "${esxi_id}"
+        "${vm_real_id}"
     then
       if [ "${my_options[-d]}" = "yes" ]
       then
         if ! \
           esxi_vm_simple_command \
             "power on" \
-            "${another_vm_esxi_id}" \
-            "${another_esxi_id}"
+            "${another_vm_real_id}"
         then
           my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see details above)"
           break
@@ -3028,8 +3021,7 @@ function command_create {
         if ! \
           esxi_vm_simple_command \
             "power shutdown" \
-            "${vm_esxi_id}" \
-            "${esxi_id}"
+            "${vm_real_id}"
         then
           my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to shutdown virtual machine, see details above)"
           break
@@ -3038,8 +3030,7 @@ function command_create {
         if ! \
           esxi_vm_simple_command \
             "power on" \
-            "${another_vm_esxi_id}" \
-            "${another_esxi_id}"
+            "${another_vm_real_id}"
         then
           my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see deatils above)"
           break
@@ -3064,8 +3055,7 @@ function command_create {
       if ! \
         esxi_vm_simple_command \
           "destroy" \
-          "${another_vm_esxi_id}" \
-          "${another_esxi_id}"
+          "${another_vm_real_id}"
       then
         my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
         continue
@@ -3155,15 +3145,8 @@ function command_destroy {
     info "Will destroy a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
     esxi_vm_simple_command \
-      "power shutdown" \
-      "${params[vm_esxi_id]}" \
-      "${esxi_id}" \
-    || continue
-
-    esxi_vm_simple_command \
       "destroy" \
-      "${params[vm_esxi_id]}" \
-      "${esxi_id}" \
+      "${vm_id}" \
     || continue
 
     my_vm_ids[${vm_id}]="${COLOR_GREEN}DESTROYED${COLOR_NORMAL}"
@@ -3646,7 +3629,6 @@ function command_update {
     esxi_id="" \
     esxi_name="" \
     real_vm_id="" \
-    vm_esxi_id="" \
     vm_id="" \
     vm_name="" \
     vm_real_id="" \
@@ -3666,7 +3648,7 @@ function command_update {
 
     info "Will update a '${update_param}' parameter at '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]})"
 
-    vm_esxi_id=""
+    vm_real_id=""
     another_esxi_names=()
     # Preparing the esxi list where the virtual machine is located
     for real_vm_id in "${!my_real_vm_list[@]}"
@@ -3675,15 +3657,14 @@ function command_update {
       then
         if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
         then
-          if [ -n "${vm_esxi_id}" ]
+          if [ -n "${vm_real_id}" ]
           then
             skipping \
               "Found multiple virtual machines with the same name on hypervisor" \
-              "with '${vm_esxi_id}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+              "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
               "Please check it manually and rename the one of the virtual machine"
             continue 2
           fi
-          vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}"
           vm_real_id="${real_vm_id}"
         else
           another_esxi_id="${my_params[${real_vm_id}.at]}"
@@ -3693,7 +3674,7 @@ function command_update {
     done
 
     # Checking existance the virtual machine on another or this hypervisors
-    if [ -z "${vm_esxi_id}" ]
+    if [ -z "${vm_real_id}" ]
     then
       skipping \
         "The virtual machine not exists on hypervisor"
