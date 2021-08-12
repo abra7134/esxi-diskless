@@ -212,6 +212,49 @@ function append_my_ids {
   return 0
 }
 
+# Function to append ISO-images identifiers
+# to ${my_iso_ids[@]} and ${my_iso_ids_ordered[@]} arrays
+# with fill ${my_params[@]} parameters of ISO-images
+#
+#  Input: ${1}                     - The ISO-image identifier will be added in corresponding arrays
+#         ${2}                     - Predefined status of ISO-image will be added as 'status' parameter
+#         ${params[@]}             - The array with parameters
+# Modify: ${my_iso_ids[@]}         - GLOBAL (see description at top)
+#         ${my_iso_ids_ordered[@]} - GLOBAL (see description at top)
+#         ${my_params[@]}          - GLOBAL (see description at top)
+# Return: 0
+#
+function append_my_iso_ids {
+  local \
+    esxi_iso_path="" \
+    iso_id="${1}" \
+    iso_status="${2}" \
+    local_iso_path="" \
+    vm_esxi_datastore=""
+
+  if [ "${params[vmx_parameters]}" = "yes" ]
+  then
+    local_iso_path="${params[special.local_iso_path]}"
+    vm_esxi_datastore="${params[special.vm_esxi_datastore]}"
+  else
+    local_iso_path="${params[local_iso_path]}"
+    vm_esxi_datastore="${params[vm_esxi_datastore]}"
+  fi
+
+  esxi_iso_path="/vmfs/volumes/${vm_esxi_datastore}/.iso/${local_iso_path##*/}"
+
+  my_iso_ids[${iso_id}]=""
+  my_iso_ids_ordered+=("${iso_id}")
+
+  my_params[${iso_id}.esxi_datastore]="${vm_esxi_datastore}"
+  my_params[${iso_id}.esxi_id]="${params[at]}"
+  my_params[${iso_id}.esxi_iso_path]="${esxi_iso_path}"
+  my_params[${iso_id}.local_iso_path]="${local_iso_path}"
+  my_params[${iso_id}.status]="${iso_status}"
+
+  return 0
+}
+
 # Function to check cache parameters
 #
 #  Input: ${CACHE_DIR}   - GLOBAL (see description at top)
@@ -497,6 +540,11 @@ function esxi_vm_simple_command {
     return 1
   fi
 
+  if [ "${vm_operation}" = "destroy" ]
+  then
+    my_params[${real_vm_id}.status]="destroyed"
+  fi
+
   echo "    The virtual machine is ${vm_operation}'ed, continue"
 
   return 0
@@ -556,7 +604,6 @@ function get_cachefile_path_for {
 #
 #  Input: ${1}             - Verify or not the status of the corresponding ISO-image
 #                            Possible values: without_check, no, or anything
-#         ${esxi_id}       - The hypervisor identifier
 #         ${my_iso_ids[@]} - GLOBAL (see description at top)
 #         ${params[@]}     - The array with parameters
 # Modify: ${iso_id}        - The ISO-image identifier
@@ -565,11 +612,19 @@ function get_cachefile_path_for {
 #                            or there is problem with upload/checking ISO-image
 function get_iso_id {
   local \
-    check_type="${1}"
+    check_type="${1}" \
+    hash_source=""
+
+  if [ "${params[vmx_parameters]}" = "yes" ]
+  then
+    hash_source="${params[at]}-${params[special.vm_esxi_datastore]}-${params[special.local_iso_path]}"
+  else
+    hash_source="${params[at]}-${params[vm_esxi_datastore]}-${params[local_iso_path]##*/}"
+  fi
 
   if ! \
     iso_id=$(
-      get_hash "${esxi_id}-${params[vm_esxi_datastore]}-${params[local_iso_path]##*/}"
+      get_hash "${hash_source}"
     )
   then
     skipping \
@@ -1057,7 +1112,7 @@ function get_real_vm_list {
   return 0
 }
 
-# The function to parse configuration file
+# Function to parse configuration file
 #
 #  Input: ${ESXI_CONFIG_PATH}       - GLOBAL (see description at top)
 # Modify: ${my_params[@]}           - GLOBAL (see description at top)
@@ -1067,6 +1122,7 @@ function get_real_vm_list {
 # Return: 0                         - The parse complete without errors
 #
 function parse_ini_file {
+  #
   # Function to check parameter value
   #
   # Input:  ${1} - The parameter name
@@ -1931,6 +1987,113 @@ function remove_cachefile_for {
   return 0
 }
 
+# Function to remove no longer needed ISO-images from hypervisors after virtual machines destroyed
+#
+# Modify: ${my_iso_ids[@]}         - GLOBAL (see description at top)
+#         ${my_iso_ids_ordered[@]} - GLOBAL (see description at top)
+#         ${my_params[@]}          - GLOBAL (see description at top)
+#         ${my_real_vm_list[@]}    - GLOBAL (see description at top)
+# Return: 0                        - Operation is complete
+#
+function remove_isos {
+  local -A \
+    params=()
+  local \
+    iso_id="" \
+    real_vm_id=""
+  local \
+    skipping_type="iso"
+
+  info "Will remove unnecessary ISO-images from hypervisor(s)"
+
+  for real_vm_id in "${!my_real_vm_list[@]}"
+  do
+    get_params "${real_vm_id}"
+
+    if [    "${params[status]}" = "destroyed" \
+         -o "${params[status]}" = "iso updated" ]
+    then
+      get_iso_id \
+        without_check \
+      || return 1
+
+      if [ ! -v my_iso_ids[${iso_id}] ]
+      then
+        append_my_iso_ids \
+          "${iso_id}" \
+          "to remove"
+      fi
+    fi
+  done
+
+  local \
+    config_vm_id="" \
+    esxi_id="" \
+    iso_used_by=() \
+    local_iso_path="" \
+    safe_to_remove_iso_image="" \
+    vm_esxi_datastore=""
+
+  for iso_id in "${my_iso_ids_ordered[@]}"
+  do
+    if [ "${my_params[${iso_id}.status]}" = "to remove" ]
+    then
+      esxi_id="${my_params[${iso_id}.esxi_id]}"
+      local_iso_path="${my_params[${iso_id}.local_iso_path]}"
+      vm_esxi_datastore="${my_params[${iso_id}.esxi_datastore]}"
+
+      safe_to_remove_iso_image="yes"
+      for real_vm_id in "${!my_real_vm_list[@]}"
+      do
+        config_vm_id="${my_params[${real_vm_id}.vm_id]}"
+        if [    "${my_params[${real_vm_id}.at]}" = "${esxi_id}" \
+             -a ! -v my_vm_ids[${real_vm_id}] \
+             -a ! -v my_vm_ids[${config_vm_id}] ]
+        then
+          if [ "${my_params[${real_vm_id}.vmx_parameters]}" = "yes" ]
+          then
+            if [    "${my_params[${real_vm_id}.special.local_iso_path]}" = "${local_iso_path}" \
+                 -a "${my_params[${real_vm_id}.special.vm_esxi_datastore]}" = "${vm_esxi_datastore}" ]
+            then
+              iso_used_by+=(
+                "'${my_real_vm_list[${real_vm_id}]}'"
+              )
+            fi
+          else
+            safe_to_remove_iso_image="no"
+            break
+          fi
+        fi
+      done
+
+      if [ "${safe_to_remove_iso_image}" != "yes" ]
+      then
+        my_iso_ids[${iso_id}]="${COLOR_YELLOW}NOT SAFE TO REMOVE FROM ESXI${COLOR_NORMAL} (VMX-parameters not received for '${my_real_vm_list[${real_vm_id}]}' (id='${my_params[${real_vm_id}.vm_esxi_id]}') virtual machine)"
+      else
+        if [ "${#iso_used_by[@]}" -gt 0 ]
+        then
+          my_iso_ids[${iso_id}]="${COLOR_YELLOW}UNABLE TO REMOVE FROM ESXI${COLOR_NORMAL} (Used by another virtual machine(s): ${iso_used_by[@]})"
+        else
+          progress "Remove the ISO-image used by the virtual machine (rm)"
+
+          run_on_hypervisor \
+            "${esxi_id}" \
+            "ssh" \
+            "rm -v \"${my_params[${iso_id}.esxi_iso_path]}\"" \
+            "|| Unable to remove the ISO-image (rm)" \
+          || continue
+
+          echo "    Remove '${my_params[${iso_id}.esxi_iso_path]}' successful"
+
+          my_iso_ids[${iso_id}]="${COLOR_GREEN}REMOVED FROM ESXI${COLOR_NORMAL}"
+        fi
+      fi
+    fi
+  done
+
+  return 0
+}
+
 # Function to run hook script
 #
 #  Input: ${1}         - The hook type (create, destroy, restart)
@@ -2169,7 +2332,7 @@ function show_processed_status {
       if [ "${#my_iso_ids[@]}" -gt 0 ]
       then
         echo >&2 -e "${COLOR_NORMAL}"
-        echo >&2 "ISO-images upload status:"
+        echo >&2 "ISO-images processing status:"
 
         local \
           local_iso_path="" \
@@ -2400,10 +2563,7 @@ function upload_isos {
   local -A \
     params=()
   local \
-    esxi_id="" \
-    esxi_iso_path="" \
     iso_id="" \
-    local_iso_path="" \
     temp_vm_id="" # Use another name for correct print 'ABORTED' statuses of virtual machines
   local \
     skipping_type="iso"
@@ -2412,34 +2572,22 @@ function upload_isos {
   do
     get_params "${temp_vm_id}"
 
-    esxi_id="${params[at]}"
-
     get_iso_id \
       without_check \
     || continue
 
     if [ ! -v my_iso_ids[${iso_id}] ]
     then
-      local_iso_path="${params[local_iso_path]}"
-      esxi_iso_path="/vmfs/volumes/${params[vm_esxi_datastore]}/.iso/${local_iso_path##*/}"
+      append_my_iso_ids "${iso_id}"
 
-      my_iso_ids[${iso_id}]=""
-      my_iso_ids_ordered+=(
-        "${iso_id}"
-      )
-      my_params[${iso_id}.local_iso_path]="${local_iso_path}"
-      my_params[${iso_id}.esxi_id]="${esxi_id}"
-      my_params[${iso_id}.esxi_datastore]="${params[vm_esxi_datastore]}"
-      my_params[${iso_id}.esxi_iso_path]="${esxi_iso_path}"
-      my_params[${iso_id}.status]=""
       # 'vm_name' used only for warning if duplicated ISO-image definition finded (see above)
       my_params[${iso_id}.vm_name]="${my_config_vm_list[${temp_vm_id}]}"
     else
-      if [ "${my_params[${iso_id}.local_iso_path]}" != "${local_iso_path}" ]
+      if [ "${my_params[${iso_id}.local_iso_path]}" != "${params[local_iso_path]}" ]
       then
         warning \
           "The duplicated ISO-image definition (having the same name but in different locations) finded:" \
-          "1. '${local_iso_path}' ISO-image defined for '${my_config_vm_list[${temp_vm_id}]}' virtual machine" \
+          "1. '${params[local_iso_path]}' ISO-image defined for '${my_config_vm_list[${temp_vm_id}]}' virtual machine" \
           "2. '${my_params[${iso_id}.local_iso_path]}' ISO-image defined for '${my_params[${iso_id}.vm_name]}' virtual machine" \
           "" \
           "Please check the configuration, an image with a unique name must be in only one instance"
@@ -2449,8 +2597,11 @@ function upload_isos {
 
   local \
     attempts=0 \
+    esxi_id="" \
+    esxi_iso_path="" \
     esxi_name="" \
     iso_status="" \
+    local_iso_path="" \
     local_iso_sha1sum="" \
     local_iso_sha1sum_path="" \
     real_iso_sha1sum="" \
@@ -2622,10 +2773,10 @@ function upload_isos {
     in
       "exist" )
         echo "    The ISO-image is already exists, skipping"
-        my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST${COLOR_NORMAL}"
+        my_iso_ids[${iso_id}]="${COLOR_YELLOW}UPLOAD NOT REQUIRED${COLOR_NORMAL} (Already exists)"
         ;;
       "need check" )
-        my_iso_ids[${iso_id}]="${COLOR_YELLOW}EXIST/FORCE CHECKED${COLOR_NORMAL}"
+        my_iso_ids[${iso_id}]="${COLOR_YELLOW}UPLOAD NOT REQUIRED/FORCE CHECKED${COLOR_NORMAL} (Already exists)"
         ;;
       "uploaded" )
         my_iso_ids[${iso_id}]="${COLOR_GREEN}UPLOADED${COLOR_NORMAL}"
@@ -2665,8 +2816,10 @@ function command_create {
       "Usage: ${my_name} ${command_name} [options] <vm_name> [<esxi_name>] [<vm_name>] ..."
   fi
 
+  # We use a 'full' scan type to obtain vmx parameters, from which it will be possible
+  # to understand whether the ISO-image is used by other virtual machines and it can be deleted
   prepare_steps \
-    simple \
+    full \
     "${@}"
 
   upload_isos
@@ -2741,6 +2894,8 @@ function command_create {
       fi
     done
 
+    my_params[${vm_real_id}.vm_id]="${vm_id}"
+
     # Checking existance the virtual machine on another or this hypervisors
     if [ -n "${vm_real_id}" \
          -a "${my_options[-f]}" != "yes" ]
@@ -2767,15 +2922,18 @@ function command_create {
     then
       skipping \
         "The virtual machine also exists on another hypervisor(s)" \
-        "${another_esxi_names[@]/#/* }"
+        "${another_esxi_names[@]/#/* }" \
         "" \
-        "Please use the '-n' option to skip this check"
+        "Please use the '-n' option to skip this check," \
+        "or use the '-d' option to remove same name instances on another hypervisors"
       continue
     fi
 
     check_vm_params \
       all \
     || continue
+
+    my_params[${another_vm_real_id}.vm_id]="${vm_id}"
 
     if [    "${params[vm_autostart]}" = "yes" \
          -a "${params[esxi_autostart_enabled]}" != "true" ]
@@ -2948,6 +3106,14 @@ function command_create {
 
     echo "    Registered with id=\"${vm_esxi_id}\""
 
+    let my_params_last_id+=1
+    vm_real_id="${my_params_last_id}"
+    my_real_vm_list[${vm_real_id}]="${vm_name}"
+    my_params[${vm_real_id}.at]="${esxi_id}"
+    my_params[${vm_real_id}.vm_esxi_id]="${vm_esxi_id}"
+    my_params[${vm_real_id}.vm_esxi_datastore]="${params[vm_esxi_datastore]}"
+    my_params[${vm_real_id}.vm_id]="${vm_id}"
+
     if [ "${params[vm_autostart]}" = "yes" ]
     then
       progress "Enable the auto-start of the virtual machine (vim-cmd hostsvc/autostartmanager/update_autostartentry)"
@@ -3036,7 +3202,7 @@ function command_create {
           break
         fi
 
-        my_vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (see details above)"
+        my_vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (See details above)"
       else
         my_vm_ids[${vm_id}]="${COLOR_YELLOW}${vm_recreated:+RE}CREATED/NO PINGING${COLOR_NORMAL}"
       fi
@@ -3057,7 +3223,7 @@ function command_create {
           "destroy" \
           "${another_vm_real_id}"
       then
-        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (see details above)"
+        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (See details above)"
         continue
       fi
     fi
@@ -3079,12 +3245,14 @@ function command_create {
 
     if [ "${my_options[-d]}" = "yes" ]
     then
-      my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
+      my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (Destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
 
-    my_vm_ids[${vm_id}]+=" (runned on '${params[local_iso_path]}')"
+    my_vm_ids[${vm_id}]+=" (Runned on '${params[local_iso_path]}')"
 
   done
+
+  remove_isos
 
   show_processed_status \
     "all" \
@@ -3099,7 +3267,7 @@ function command_create {
 function command_destroy {
   if [ "${1}" = "description" ]
   then
-    echo "Stop and destroy virtual machine(s)"
+    echo "Shutdown and destroy virtual machine(s)"
     return 0
   fi
 
@@ -3169,8 +3337,10 @@ function command_destroy {
 
   done
 
+  remove_isos
+
   show_processed_status \
-    "vm" \
+    "all" \
     "\nTotal: %d destroyed, %d skipped virtual machines\n" \
     ${destroyed_vms} \
     $((${#my_vm_ids[@]}-destroyed_vms))
@@ -3292,6 +3462,72 @@ function command_ls {
     "${#my_config_esxi_list[@]}" \
     "${#my_vm_ids[@]}" \
     "${#my_config_vm_list[@]}"
+
+  exit 0
+}
+
+function command_restart {
+  if [ "${1}" = "description" ]
+  then
+    echo "Restart virtual machine(s)"
+    return 0
+  fi
+
+  local \
+    supported_my_options=("-i")
+
+  if [ "${#}" -lt 1 ]
+  then
+    show_usage \
+      "Please specify a virtual machine name or names which will be restarted" \
+      "You can also prefixed a virtual machine name with hypervisor name to specify its exact location" \
+      "" \
+      "Usage: ${my_name} ${command_name} [options] <vm_name> [vm_name] [<esxi_name>/<vm_name>] ..."
+  fi
+
+  prepare_steps \
+    simple \
+    "${@}"
+
+  local -A \
+    params=()
+  local \
+    restarted_vms=0 \
+    esxi_id="" \
+    esxi_name="" \
+    vm_id="" \
+    vm_name=""
+
+  for vm_id in "${my_vm_ids_ordered[@]}"
+  do
+    vm_name="${my_real_vm_list[${vm_id}]}"
+    esxi_id="${my_params[${vm_id}.at]}"
+    esxi_name="${my_config_esxi_list[${esxi_id}]}"
+
+    # Skip if we have any error on hypervisor
+    [ -n "${my_esxi_ids[${esxi_id}]}" ] \
+    && continue
+
+    get_params "${vm_id}|${esxi_id}"
+
+    info "Will restart a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
+
+    esxi_vm_simple_command \
+      "power restart" \
+      "${params[vm_esxi_id]}" \
+      "${esxi_id}" \
+    || continue
+
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}RESTARTED${COLOR_NORMAL}"
+    let restarted_vms+=1
+
+  done
+
+  show_processed_status \
+    "vm" \
+    "\nTotal: %d restarted, %d skipped virtual machines\n" \
+    ${restarted_vms} \
+    $((${#my_vm_ids[@]}-restarted_vms))
 
   exit 0
 }
@@ -3673,6 +3909,8 @@ function command_update {
       fi
     done
 
+    my_params[${vm_real_id}.vm_id]="${vm_id}"
+
     # Checking existance the virtual machine on another or this hypervisors
     if [ -z "${vm_real_id}" ]
     then
@@ -3759,7 +3997,7 @@ function command_update {
         ".iso/${params[local_iso_path]##*/}"
     then
       skipping \
-        "Unable to update the '${update_param}' parameter"
+        "Unable to update the '${update_param#special.}' parameter"
       continue
     fi
 
@@ -3788,8 +4026,11 @@ function command_update {
       ""
 
     my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param#special.}='${params[${update_param#special.}]}')"
+    my_params[${vm_real_id}.status]="iso updated"
     let updated_vms+=1
   done
+
+  remove_isos
 
   show_processed_status \
     "all" \
