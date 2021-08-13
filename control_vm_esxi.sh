@@ -94,6 +94,7 @@ declare -A \
     [-i]="Do not stop the script if any of hypervisors are not available"
     [-n]="Skip virtual machine availability check on all hypervisors"
     [-sn]="Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)"
+    [-sr]="Skip the automatically ISO-images removing from hypervisors"
     [-t]="Trust the .sha1 files (don't recalculate checksums for ISO-images if .sha1 file is readable)"
   )
 
@@ -2039,11 +2040,15 @@ function remove_cachefile_for {
 #
 # Modify: ${my_iso_ids[@]}         - GLOBAL (see description at top)
 #         ${my_iso_ids_ordered[@]} - GLOBAL (see description at top)
+#         ${my_options[@]}         - GLOBAL (see description at top)
 #         ${my_params[@]}          - GLOBAL (see description at top)
 #         ${my_real_vm_list[@]}    - GLOBAL (see description at top)
 # Return: 0                        - Operation is complete
 #
 function remove_isos {
+  [ "${my_options[-sr]}" = "yes" ] \
+  && return 0
+
   local -A \
     params=()
   local \
@@ -2853,7 +2858,7 @@ function command_create {
   fi
 
   local \
-    supported_my_options=("-d" "-f" "-ff" "-fs" "-i" "-n" "-sn" "-t")
+    supported_my_options=("-d" "-f" "-ff" "-fs" "-i" "-n" "-sn" "-sr" "-t")
 
   if [ "${#}" -lt 1 ]
   then
@@ -3320,7 +3325,7 @@ function command_destroy {
   fi
 
   local \
-    supported_my_options=("-fs" "-i" "-n")
+    supported_my_options=("-fs" "-i" "-n" "-sr")
 
   if [ "${#}" -lt 1 ]
   then
@@ -3865,7 +3870,7 @@ function command_update {
   fi
 
   local \
-    supported_my_options=("-ff" "-i" "-n" "-sn" "-t") \
+    supported_my_options=("-ff" "-i" "-n" "-sn" "-sr" "-t") \
     supported_update_params=("local_iso_path")
 
   if [ "${#}" -lt 1 ]
