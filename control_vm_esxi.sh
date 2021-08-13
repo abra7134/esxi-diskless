@@ -90,6 +90,7 @@ declare -A \
     [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
     [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
     [-ff]="Force check checksums for existed ISO-images on hypervisor"
+    [-fs]="Force shutdown (use poweroff instead) if 'vmware-tools' package is not installed"
     [-i]="Do not stop the script if any of hypervisors are not available"
     [-n]="Skip virtual machine availability check on all hypervisors"
     [-sn]="Skip checking network parameters of virtual machine (for cases where the gateway is out of the subnet)"
@@ -467,7 +468,9 @@ function esxi_vm_simple_command {
     esxi_name="${my_config_esxi_list[${esxi_id}]}" \
     vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}" \
     vm_state_filepath="${temp_dir}/vm_state" \
-    vm_state=""
+    vm_state="" \
+    vm_tools_status_filepath="${temp_dir}/vm_tools_status" \
+    vm_tools_status=""
 
   progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
 
@@ -496,6 +499,51 @@ function esxi_vm_simple_command {
 
   if [ "${vm_state}" != "Absent" ]
   then
+    if [ "${vm_operation}" = "power shutdown" ]
+    then
+      run_on_hypervisor \
+      >"${vm_tools_status_filepath}" \
+        "${esxi_id}" \
+        "ssh" \
+        "set -o pipefail" \
+        "vim-cmd vmsvc/get.guest \"${vm_esxi_id}\" | grep toolsStatus" \
+        "|| Failed to get guest information (vim-cmd vmsvc/get.guest)" \
+      || return 1
+
+      if ! \
+        read -r \
+          vm_tools_status \
+        <"${vm_tools_status_filepath}"
+      then
+        skipping \
+          "Failed to get virtual machine 'vmware-tools' status information from '${vm_tools_status_filepath}' file"
+        return 1
+      elif [[ "${vm_tools_status}" =~ ^[[:blank:]]*toolsStatus[[:blank:]]*=[[:blank:]]*\"(.*)\",[[:blank:]]*$ ]]
+      then
+        vm_tools_status="${BASH_REMATCH[1]}"
+
+        if [ "${vm_tools_status}" != "toolsOk" ]
+        then
+          if [ "${my_options[-fs]}" != "yes" ]
+          then
+            skipping \
+              "Failed to shutdown due 'vmware-tools' is not runned on virtual machine" \
+              "Run 'vmware-tools' on virtual machine and try again" \
+              "Or use '-fs' option to poweroff machine instead of shutdown (use carefully)"
+            return 1
+          fi
+
+         echo "    Option '-fs' is specified, virtual machine will be poweroff"
+          vm_operation="power off"
+        fi
+      else
+        skipping \
+          "Cannot parse the 'vmware-tools' status information obtained from hypervisor" \
+          "--> ${vm_tools_status}"
+        return 1
+      fi
+    fi
+
     run_on_hypervisor \
       "${esxi_id}" \
       "ssh" \
@@ -911,8 +959,8 @@ function get_real_vm_list {
         "${vms_map_filepath}" \
         "${esxi_id}" \
         "ssh" \
-        "type -f awk cat mkdir vim-cmd >/dev/null" \
-        "|| Don't find one of required commands on hypervisor: awk, cat, mkdir or vim-cmd" \
+        "type -f awk cat grep mkdir vim-cmd >/dev/null" \
+        "|| Don't find one of required commands on hypervisor: awk, cat, grep, mkdir or vim-cmd" \
         "vim-cmd vmsvc/getallvms" \
         "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)"
     then
@@ -2079,7 +2127,7 @@ function remove_isos {
           run_on_hypervisor \
             "${esxi_id}" \
             "ssh" \
-            "rm -v \"${my_params[${iso_id}.esxi_iso_path]}\"" \
+            "rm \"${my_params[${iso_id}.esxi_iso_path]}\"" \
             "|| Unable to remove the ISO-image (rm)" \
           || continue
 
@@ -2805,7 +2853,7 @@ function command_create {
   fi
 
   local \
-    supported_my_options=("-d" "-f" "-ff" "-i" "-n" "-sn" "-t")
+    supported_my_options=("-d" "-f" "-ff" "-fs" "-i" "-n" "-sn" "-t")
 
   if [ "${#}" -lt 1 ]
   then
@@ -3272,7 +3320,7 @@ function command_destroy {
   fi
 
   local \
-    supported_my_options=("-i" "-n")
+    supported_my_options=("-fs" "-i" "-n")
 
   if [ "${#}" -lt 1 ]
   then
