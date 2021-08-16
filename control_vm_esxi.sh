@@ -999,6 +999,7 @@ function get_real_vm_list {
         my_params[${real_vm_id}.vm_esxi_id]="${vm_esxi_id}"
         my_params[${real_vm_id}.at]="${esxi_id}"
         my_params[${real_vm_id}.vm_esxi_datastore]="${vm_esxi_datastore}"
+        my_params[${real_vm_id}.special.vm_autostart]="no"
 
         if [ "${get_type}" = "full" ]
         then
@@ -1146,8 +1147,6 @@ function get_real_vm_list {
                 if [[ "${autostart_param_value}" =~ ^[[:digit:]]+$ ]]
                 then
                   my_params[${real_vm_id}.special.vm_autostart]="yes"
-                else
-                  my_params[${real_vm_id}.special.vm_autostart]="no"
                 fi
               fi
             fi
