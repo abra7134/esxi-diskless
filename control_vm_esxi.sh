@@ -568,21 +568,21 @@ function esxi_vm_simple_command {
 
   local \
     attempts=10
+  until
+    sleep 5;
+    esxi_get_vm_state \
+    || return 1;
+    [ ${attempts} -lt 1 ] \
+    || [ "${vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
+    || [ "${vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
+    || [ "${vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
+    || [ "${vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
+  do
+    echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
+    let attempts--
+  done
 
-  if ! \
-    until
-      sleep 5;
-      esxi_get_vm_state \
-      || return 1;
-      [ ${attempts} -lt 1 ] \
-      || [ "${vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
-      || [ "${vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
-      || [ "${vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
-      || [ "${vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
-    do
-      echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
-      let attempts--
-    done
+  if [ "${attempts}" -lt 1 ]
   then
     skipping \
       "Failed to ${vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
