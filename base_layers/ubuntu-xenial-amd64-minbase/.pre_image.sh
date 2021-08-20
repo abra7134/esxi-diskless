@@ -35,6 +35,14 @@ sed --in-place \
 echo "OK"
 
 echo "--"
+echo "-- Add 'nobody'-user to 'cdrom'-group (gpasswd)"
+echo "--"
+sed --in-place \
+  "/^cdrom/s/$/nobody/" \
+  "${build_dir}"/etc/group
+echo "OK"
+
+echo "--"
 echo "-- Create necessary directories (mkdir)"
 echo "--"
 mkdir \

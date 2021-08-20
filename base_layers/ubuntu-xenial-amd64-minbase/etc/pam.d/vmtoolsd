@@ -1,0 +1,7 @@
+#%PAM-1.0
+
+auth [success=ok default=1] pam_succeed_if.so quiet user = nobody
+auth [success=done default=ignore] pam_permit.so
+
+@include common-auth
+@include common-account
