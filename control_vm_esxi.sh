@@ -691,7 +691,7 @@ function get_iso_id {
     elif [[ "${my_params[${iso_id}.status]}" != "ok" ]]
     then
       skipping \
-        "Problem with upload/checking the '${params[local_iso_path]}' ISO-image (details see at 'upload status' above)"
+        "Problem with upload/checking the '${params[local_iso_path]}' ISO-image (details see above ^^^)"
       return 1
     fi
   fi
@@ -2608,6 +2608,7 @@ function upload_isos {
     real_iso_sha1sum="" \
     remote_iso_sha1sum="" \
     temp_iso_id="" \
+    temp_iso_suffix=".tmp" \
     sha1sum=""
   local \
     temp_iso_sha1sum_path="${temp_dir}/sha1sum"
@@ -2716,12 +2717,17 @@ function upload_isos {
 
     if [ "${iso_status}" != "exist" ]
     then
+      if [ "${iso_status}" = "uploaded" ]
+      then
+        esxi_iso_path+="${temp_iso_suffix}"
+      fi
+
       let attempts=5
       while [ ${attempts} -gt 0 ]
       do
         if [ "${iso_status}" = "uploaded" ]
         then
-          progress "Upload the ISO image file to '${esxi_name}' hypervisor (scp)"
+          progress "Upload the ISO-image to temporary file on '${esxi_name}' hypervisor (scp)"
           run_on_hypervisor \
             "${esxi_id}" \
             "scp" \
@@ -2744,8 +2750,21 @@ function upload_isos {
         || continue 2
         remote_iso_sha1sum="${sha1sum}"
 
-        [ "${local_iso_sha1sum}" = "${remote_iso_sha1sum}" ] \
-        && break
+        if [ "${local_iso_sha1sum}" = "${remote_iso_sha1sum}" ]
+        then
+          if [ "${iso_status}" = "uploaded" ]
+          then
+            progress "Rename the temporary ISO-image file (mv)"
+            run_on_hypervisor \
+              "${esxi_id}" \
+              "ssh" \
+              "mv \"${esxi_iso_path}\" \"${esxi_iso_path%${temp_iso_suffix}}\"" \
+              "|| Failed to rename temporary ISO-image (mv)" \
+            || continue 2
+          fi
+
+          break
+        fi
 
         if [ "${iso_status}" = "need check" ]
         then
