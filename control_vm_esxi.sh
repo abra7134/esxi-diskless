@@ -2531,11 +2531,11 @@ function upload_isos {
 
   # Function to read the sha1-sum from the first string in file
   #
-  #  Input: ${1}     - The path to file from which the sha1-sum will be read
-  # Output: >&1      - The sha1-sum readed from the first string in file
-  # Return: 0        - Always
+  #  Input: ${1}       - The path to file from which the sha1-sum will be read
+  # Modify: ${sha1sum} - The sha1-sum readed from the first string in file
+  # Return: 0          - Always
   #
-  function read_sha1 {
+  function read_sha1sum {
     local \
       sha1sum_str="" \
       sha1sum_path="${1}"
@@ -2555,7 +2555,7 @@ function upload_isos {
         "${sha1sum_str}"
       return 1
     else
-      echo "${BASH_REMATCH[1]}"
+      sha1sum="${BASH_REMATCH[1]}"
     fi
 
     return 0
@@ -2607,7 +2607,8 @@ function upload_isos {
     local_iso_sha1sum_path="" \
     real_iso_sha1sum="" \
     remote_iso_sha1sum="" \
-    temp_iso_id=""
+    temp_iso_id="" \
+    sha1sum=""
   local \
     temp_iso_sha1sum_path="${temp_dir}/sha1sum"
 
@@ -2650,14 +2651,14 @@ function upload_isos {
     then
       progress "Read the checksum from '${local_iso_sha1sum_path}' file"
       if ! \
-        local_iso_sha1sum=$(
-          read_sha1 \
-            "${local_iso_sha1sum_path}"
-        )
+        read_sha1sum \
+          "${local_iso_sha1sum_path}"
       then
         my_params[${iso_id}.status]="iso problem"
         continue
       fi
+
+      local_iso_sha1sum="${sha1sum}"
     fi
 
     if [ -z "${local_iso_sha1sum}" \
@@ -2675,11 +2676,10 @@ function upload_isos {
         continue
       fi
 
-      real_iso_sha1sum=$(
-        read_sha1 \
-          "${temp_iso_sha1sum_path}"
-      ) \
+      read_sha1sum \
+        "${temp_iso_sha1sum_path}" \
       || continue
+      real_iso_sha1sum="${sha1sum}"
 
       if [ -z "${local_iso_sha1sum}" ]
       then
@@ -2739,11 +2739,10 @@ function upload_isos {
           "|| Failed to calculate the checksum of ISO-image (sha1sum)" \
         || continue 2
 
-        remote_iso_sha1sum=$(
-          read_sha1 \
-            "${temp_iso_sha1sum_path}"
-        ) \
+        read_sha1sum \
+          "${temp_iso_sha1sum_path}" \
         || continue 2
+        remote_iso_sha1sum="${sha1sum}"
 
         [ "${local_iso_sha1sum}" = "${remote_iso_sha1sum}" ] \
         && break
