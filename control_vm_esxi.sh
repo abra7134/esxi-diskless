@@ -3905,7 +3905,6 @@ function command_update {
     || continue
 
     progress "Getting the identifier of virtual CD-ROM (govc device.ls cdrom-*)"
-
     if ! \
       GOVC_USERNAME="${params[esxi_ssh_username]}" \
       GOVC_PASSWORD="${params[esxi_ssh_password]}" \
@@ -3939,8 +3938,26 @@ function command_update {
         "Unable to parse the cdrom identifier '${cdrom_id}', it must be prefixed with 'cdrom-'"
     fi
 
-    progress "Update the '${update_param}' parameter (govc device.cdrom.insert)"
+    progress "Eject the ISO-image from virtual machine's CD-ROM (govc guest.run -l nobody)"
+    if ! \
+      GOVC_USERNAME="${params[esxi_ssh_username]}" \
+      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+      govc \
+        guest.run \
+        -dc=ha-datacenter \
+        -k=true \
+        -l=nobody \
+        -u="https://${params[esxi_hostname]}" \
+        -vm="${vm_name}" \
+        /usr/bin/eject --manualeject off /dev/cdrom \
+        \&\& /usr/bin/eject /dev/cdrom
+    then
+      skipping \
+        "Unable to eject the ISO-image from virtual machine's CD-ROM"
+      continue
+    fi
 
+    progress "Update the '${update_param}' parameter (govc device.cdrom.insert)"
     if ! \
       GOVC_USERNAME="${params[esxi_ssh_username]}" \
       GOVC_PASSWORD="${params[esxi_ssh_password]}" \
@@ -3960,7 +3977,6 @@ function command_update {
     fi
 
     progress "Connect the ISO to CDROM (govc device.connect)"
-
     if ! \
       GOVC_USERNAME="${params[esxi_ssh_username]}" \
       GOVC_PASSWORD="${params[esxi_ssh_password]}" \
