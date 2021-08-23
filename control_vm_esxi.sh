@@ -90,6 +90,7 @@ declare -A \
     [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
     [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
     [-ff]="Force check checksums for existed ISO-images on hypervisor"
+    [-fr]="Force reboot (use reset instead) if 'vmware-tools' package is not installed"
     [-fs]="Force shutdown (use poweroff instead) if 'vmware-tools' package is not installed"
     [-i]="Do not stop the script if any of hypervisors are not available"
     [-n]="Skip virtual machine availability check on all hypervisors"
@@ -368,7 +369,7 @@ function check_vm_params {
 
 # Function to run simple operation on virtual machine
 #
-# Input:  ${1}                      - The virtual machine operation: 'destroy', 'power on', 'power off' or 'power shutdown'
+# Input:  ${1}                      - The virtual machine operation: 'destroy', 'power on', 'power off', 'power reboot', 'power reset' or 'power shutdown'
 #         ${2}                      - The virtual machine identifier at ${my_real_vm_list[@]} array
 #         ${temp_dir}               - The temporary directory to save commands outputs
 #         ${my_params[@]}           - GLOBAL (see description at top)
@@ -453,10 +454,12 @@ function esxi_vm_simple_command {
   if [    "${vm_operation}" != "destroy" \
        -a "${vm_operation}" != "power on" \
        -a "${vm_operation}" != "power off" \
+       -a "${vm_operation}" != "power reboot" \
+       -a "${vm_operation}" != "power reset" \
        -a "${vm_operation}" != "power shutdown" ]
   then
     internal \
-      "The \${vm_operation} must be 'destroy', 'power on', 'power off' or 'power shutdown', but not '${vm_operation}'"
+      "The \${vm_operation} must be 'destroy', 'power on', 'power off', 'power reboot', 'power reset' or 'power shutdown', but not '${vm_operation}'"
   elif [ ! -v my_real_vm_list[${real_vm_id}] ]
   then
     internal \
@@ -469,8 +472,7 @@ function esxi_vm_simple_command {
     esxi_name="${my_config_esxi_list[${esxi_id}]}" \
     vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}" \
     vm_state_filepath="${temp_dir}/vm_state" \
-    vm_state="" \
-    vm_tools_status=""
+    vm_state=""
 
   progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
 
@@ -490,6 +492,11 @@ function esxi_vm_simple_command {
         "${real_vm_id}" \
       || return 1
     fi
+  elif [    "${vm_operation}" = "power reboot" \
+         -o "${vm_operation}" = "power reset" ]
+  then
+    skipping "Unable to reboot powered off virtual machine"
+    return 1
   elif [    "${vm_operation}" = "power off" \
          -o "${vm_operation}" = "power shutdown" ]
   then
@@ -499,8 +506,12 @@ function esxi_vm_simple_command {
 
   if [ "${vm_state}" != "Absent" ]
   then
-    if [ "${vm_operation}" = "power shutdown" ]
+    if [    "${vm_operation}" = "power shutdown" \
+         -o "${vm_operation}" = "power reboot" ]
     then
+      local \
+        vm_tools_status=""
+
       get_vm_tools_status \
         "${esxi_id}" \
         "${vm_esxi_id}" \
@@ -508,17 +519,38 @@ function esxi_vm_simple_command {
 
       if [ "${vm_tools_status}" != "toolsOk" ]
       then
-        if [ "${my_options[-fs]}" != "yes" ]
-        then
-          skipping \
-            "Failed to shutdown due 'vmware-tools' is not runned on virtual machine" \
-            "Run 'vmware-tools' on virtual machine and try again" \
-            "Or use '-fs' option to poweroff machine instead of shutdown (use carefully)"
-          return 1
-        fi
+        local \
+          current_operation="" \
+          future_operation="" \
+          test_option=""
 
-        echo "    Option '-fs' is specified, virtual machine will be poweroff"
-        vm_operation="power off"
+        for test_option in \
+          "power shutdown:-fs:power off" \
+          "power reboot:-fr:power reset"
+        do
+          IFS=":" \
+            read \
+              current_operation \
+              test_option \
+              future_operation \
+            <<<"${test_option}"
+
+          if [ "${current_operation}" = "${vm_operation}" ]
+          then
+            if [ "${my_options[${test_option}]}" != "yes" ]
+            then
+              skipping \
+                "Failed to ${current_operation#power } due 'vmware-tools' is not runned on virtual machine" \
+                "Run 'vmware-tools' on virtual machine and try again" \
+                "Or use '${test_option}' option to ${future_operation} machine instead of ${current_operation#power } (use carefully)"
+              return 1
+            fi
+
+            echo "    Option '${test_option}' is specified, virtual machine will be ${future_operation}"
+            vm_operation="${future_operation}"
+            break
+          fi
+        done
       fi
     fi
 
@@ -541,34 +573,36 @@ function esxi_vm_simple_command {
       autostart_seq \
       filesystems \
       vms
-  fi
-
-  local \
-    attempts=10
-  until
-    esxi_get_vm_state \
-    || return 1;
-    [ ${attempts} -lt 1 ] \
-    || [ "${vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
-    || [ "${vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
-    || [ "${vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
-    || [ "${vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
-  do
-    echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
-    let attempts--
-    sleep 5
-  done
-
-  if [ "${attempts}" -lt 1 ]
+  elif [    "${vm_operation}" != "power reboot" \
+         -a "${vm_operation}" != "power reset" ]
   then
-    skipping \
-      "Failed to ${vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
-    return 1
-  fi
+    local \
+      attempts=10
+    until
+      esxi_get_vm_state \
+      || return 1;
+      [ ${attempts} -lt 1 ] \
+      || [ "${vm_operation}" = "destroy"        -a "${vm_state}" = "Absent" ] \
+      || [ "${vm_operation}" = "power on"       -a "${vm_state}" = "Powered on" ] \
+      || [ "${vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
+      || [ "${vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
+    do
+      echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
+      let attempts--
+      sleep 5
+    done
 
-  if [ "${vm_operation}" = "destroy" ]
-  then
-    my_params[${real_vm_id}.status]="destroyed"
+    if [ "${attempts}" -lt 1 ]
+    then
+      skipping \
+        "Failed to ${vm_operation} machine on '${esxi_name}' hypervisor (is still in state '${vm_state}')"
+      return 1
+    fi
+
+    if [ "${vm_operation}" = "destroy" ]
+    then
+      my_params[${real_vm_id}.status]="destroyed"
+    fi
   fi
 
   echo "    The virtual machine is ${vm_operation}'ed, continue"
@@ -1667,7 +1701,8 @@ function parse_cmd_config_list {
       continue
     fi
 
-    if [ "${command_name}" = "destroy" ]
+    if [    "${command_name}" = "destroy" \
+         -o "${command_name}" = "reboot" ]
     then
       esxi_name="${arg_name%%/*}"
       if [ "${esxi_name}" != "${arg_name}" ]
@@ -1702,7 +1737,8 @@ function parse_cmd_config_list {
       then
         esxi_id="${my_params[${vm_id}.at]}"
 
-        if [ "${command_name}" = "destroy" ]
+        if [    "${command_name}" = "destroy" \
+             -o "${command_name}" = "reboot" ]
         then
           append_my_ids \
             "${esxi_id}"
@@ -1716,7 +1752,8 @@ function parse_cmd_config_list {
       fi
     done
 
-    if [ "${command_name}" != "destroy" ]
+    if [    "${command_name}" != "destroy" \
+         -a "${command_name}" != "reboot" ]
     then
       for esxi_id in "${!my_config_esxi_list[@]}"
       do
@@ -1932,7 +1969,8 @@ function prepare_steps {
 
       if [ "${my_options[-n]}" = "yes" ]
       then
-        if [ "${command_name}" = "destroy" ]
+        if [    "${command_name}" = "destroy" \
+             -o "${command_name}" = "reboot" ]
         then
           info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only"
         else
@@ -1955,7 +1993,8 @@ function prepare_steps {
           "${!my_config_esxi_list[@]}"
       fi
 
-      if [ "${command_name}" = "destroy" ]
+      if [    "${command_name}" = "destroy" \
+           -o "${command_name}" = "reboot" ]
       then
         progress "Parse command line arguments list"
         parse_cmd_real_list "${@}"
@@ -2118,7 +2157,7 @@ function remove_isos {
 
 # Function to run hook script
 #
-#  Input: ${1}         - The hook type (create, destroy, restart)
+#  Input: ${1}         - The hook type (create, destroy, reboot)
 #         ${2}         - The hook path (must be executable)
 #         ${3}         - The name of virtual machine for which the hook is called
 #         ${4}         - The hypervisor name on which the virtual machine is serviced
@@ -3311,23 +3350,28 @@ function command_destroy {
     return 0
   fi
 
-  local \
-    supported_my_options=("-fs" "-sr")
+  if [ -z "${supported_my_options}" ]
+  then
+    local \
+      supported_my_options=("-fs" "-sr")
+  fi
 
   if [ "${#}" -lt 1 ]
   then
     show_usage \
-      "Please specify a virtual machine name or names which will be stopped and destroyed" \
+      "Please specify a virtual machine name or names which will be ${command_name}ed" \
       "You can also prefixed a virtual machine name with hypervisor name" \
-      "to destroy a virtual machine that does not exist in the configuration file" \
+      "to ${command_name} a virtual machine that does not exist in the configuration file" \
       "" \
       "Usage: ${my_name} ${command_name} [options] <vm_name> [vm_name] [<esxi_name>/<vm_name>] ..."
   fi
 
   # Always scan only necessary hypervisors
   my_options[-n]="yes"
+
   # We use a 'full' scan type to obtain vmx parameters, from which it will be possible
   # to understand whether the ISO-image is used by other virtual machines and it can be deleted
+  # and also for obtain the ipv4 address for 'reboot' command
   prepare_steps \
     "full" \
     "${@}"
@@ -3335,7 +3379,8 @@ function command_destroy {
   local -A \
     params=()
   local \
-    destroyed_vms=0 \
+    attempts=0 \
+    processed_vms=0 \
     esxi_id="" \
     esxi_name="" \
     vm_id="" \
@@ -3355,21 +3400,95 @@ function command_destroy {
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will destroy a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
+    info "Will ${command_name} a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
+
+    if [ "${command_name}" != "destroy" ]
+    then
+      if [ -z "${params[guestinfo.ipv4_address]}" ]
+      then
+        skipping \
+          "Cannot get IPv4 virtual machine address ('guestos.ipv4_address' VMX-parameter)" \
+          "There may be a configuration error, the virtual machine can simply be re-created"
+        continue
+      fi
+
+      progress "Checking the network availability of the virtual machine (ping)"
+      let attempts=3
+      until
+        [ "${attempts}" -lt 1 ] \
+        || ping_host "${params[guestinfo.ipv4_address]}"
+      do
+        echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
+        let attempts--
+        sleep 5
+      done
+
+      if [ "${attempts}" -lt 1 ]
+      then
+        skipping \
+          "No connectivity to virtual machine" \
+          "${command_name^} not possible because it is difficult to determine whether the reboot was actually" \
+          "Please check the state of the virtual machine manually"
+        continue
+      fi
+    fi
 
     esxi_vm_simple_command \
-      "destroy" \
+      "${command_name/reboot/power reboot}" \
       "${vm_id}" \
     || continue
 
-    my_vm_ids[${vm_id}]="${COLOR_GREEN}DESTROYED${COLOR_NORMAL}"
-    let destroyed_vms+=1
+    if [ "${command_name}" != "destroy" ]
+    then
+      progress "Waiting for the virtual machine to reboot (ping)"
+      let attempts=10
+      until
+        [ "${attempts}" -lt 1 ] \
+        || ! ping_host "${params[guestinfo.ipv4_address]}"
+      do
+        echo "    Virtual machine is still alive, wait another 5 seconds (${attempts} attempts left)"
+        let attempts--
+        sleep 5
+      done
+
+      if [ "${attempts}" -lt 1 ]
+      then
+        skipping \
+          "The virtual machine is still alive after ${command_name}" \
+          "Please check the state of the virtual machine manually"
+        continue
+      fi
+
+      echo "    The virtual machine is rebooted"
+
+      progress "Checking the network availability of the virtual machine (ping)"
+      let attempts=10
+      until
+        [ "${attempts}" -lt 1 ] \
+        || ping_host "${params[guestinfo.ipv4_address]}"
+      do
+        echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
+        let attempts--
+        sleep 5
+      done
+
+      if [ "${attempts}" -lt 1 ]
+      then
+        skipping \
+          "No connectivity to virtual machine after ${command_name}" \
+          "Please check the state of the virtual machine manually"
+        continue
+      fi
+    fi
+
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}${command_name^^}ED${COLOR_NORMAL}"
+    let processed_vms+=1
 
     if [ -n "${params[local_hook_path]}" ]
     then
       if ! \
         run_hook \
-          "destroy" \
+          "${command_name}" \
           "${params[local_hook_path]}" \
           "${vm_name}" \
           "${esxi_name}"
@@ -3382,13 +3501,16 @@ function command_destroy {
 
   done
 
-  remove_isos
+  if [ "${command_name}" = "destroy" ]
+  then
+    remove_isos
+  fi
 
   show_processed_status \
     "all" \
-    "\nTotal: %d destroyed, %d skipped virtual machines\n" \
-    ${destroyed_vms} \
-    $((${#my_vm_ids[@]}-destroyed_vms))
+    "\nTotal: %d ${command_name}ed, %d skipped virtual machines\n" \
+    ${processed_vms} \
+    $((${#my_vm_ids[@]}-processed_vms))
 
   exit 0
 }
@@ -3447,7 +3569,6 @@ function command_ls {
   echo -e "${COLOR_NORMAL}"
   echo "List of controlled ESXi and VM instances (in order specified in the configuration file):"
   info \
-    "You can also specify a list of ESXi and VM instances to display only" \
     "The higlighted values are overridden from default values ([defaults] section)"
 
   local \
@@ -3509,6 +3630,19 @@ function command_ls {
     "${#my_config_vm_list[@]}"
 
   exit 0
+}
+
+function command_reboot {
+  if [ "${1}" = "description" ]
+  then
+    echo "Reboot or restart virtual machine(s)"
+    return 0
+  fi
+
+  local \
+    supported_my_options=("-fr")
+
+  command_destroy "${@}"
 }
 
 function command_show {
