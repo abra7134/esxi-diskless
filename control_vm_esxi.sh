@@ -546,7 +546,6 @@ function esxi_vm_simple_command {
   local \
     attempts=10
   until
-    sleep 5;
     esxi_get_vm_state \
     || return 1;
     [ ${attempts} -lt 1 ] \
@@ -557,6 +556,7 @@ function esxi_vm_simple_command {
   do
     echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
     let attempts--
+    sleep 5
   done
 
   if [ "${attempts}" -lt 1 ]
@@ -3208,12 +3208,12 @@ function command_create {
     progress "Waiting the network availability of the virtual machine (ping)"
     let attempts=10
     until
-      sleep 5;
       [ "${attempts}" -lt 1 ] \
       || ping_host "${params[vm_ipv4_address]}"
     do
       echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
       let attempts--
+      sleep 5
     done
 
     if [ "${attempts}" -lt 1 ]
