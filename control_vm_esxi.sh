@@ -470,7 +470,6 @@ function esxi_vm_simple_command {
     vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}" \
     vm_state_filepath="${temp_dir}/vm_state" \
     vm_state="" \
-    vm_tools_status_filepath="${temp_dir}/vm_tools_status" \
     vm_tools_status=""
 
   progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
@@ -502,46 +501,24 @@ function esxi_vm_simple_command {
   then
     if [ "${vm_operation}" = "power shutdown" ]
     then
-      run_on_hypervisor \
-      >"${vm_tools_status_filepath}" \
+      get_vm_tools_status \
         "${esxi_id}" \
-        "ssh" \
-        "set -o pipefail" \
-        "vim-cmd vmsvc/get.guest \"${vm_esxi_id}\" | grep toolsStatus" \
-        "|| Failed to get guest information (vim-cmd vmsvc/get.guest)" \
+        "${vm_esxi_id}" \
       || return 1
 
-      if ! \
-        read -r \
-          vm_tools_status \
-        <"${vm_tools_status_filepath}"
+      if [ "${vm_tools_status}" != "toolsOk" ]
       then
-        skipping \
-          "Failed to get virtual machine 'vmware-tools' status information from '${vm_tools_status_filepath}' file"
-        return 1
-      elif [[ "${vm_tools_status}" =~ ^[[:blank:]]*toolsStatus[[:blank:]]*=[[:blank:]]*\"(.*)\",[[:blank:]]*$ ]]
-      then
-        vm_tools_status="${BASH_REMATCH[1]}"
-
-        if [ "${vm_tools_status}" != "toolsOk" ]
+        if [ "${my_options[-fs]}" != "yes" ]
         then
-          if [ "${my_options[-fs]}" != "yes" ]
-          then
-            skipping \
-              "Failed to shutdown due 'vmware-tools' is not runned on virtual machine" \
-              "Run 'vmware-tools' on virtual machine and try again" \
-              "Or use '-fs' option to poweroff machine instead of shutdown (use carefully)"
-            return 1
-          fi
-
-         echo "    Option '-fs' is specified, virtual machine will be poweroff"
-          vm_operation="power off"
+          skipping \
+            "Failed to shutdown due 'vmware-tools' is not runned on virtual machine" \
+            "Run 'vmware-tools' on virtual machine and try again" \
+            "Or use '-fs' option to poweroff machine instead of shutdown (use carefully)"
+          return 1
         fi
-      else
-        skipping \
-          "Cannot parse the 'vmware-tools' status information obtained from hypervisor" \
-          "--> ${vm_tools_status}"
-        return 1
+
+        echo "    Option '-fs' is specified, virtual machine will be poweroff"
+        vm_operation="power off"
       fi
     fi
 
@@ -1156,6 +1133,50 @@ function get_real_vm_list {
       fi
     fi
   done
+
+  return 0
+}
+
+# Function to get 'vmware-tools' running status from hypervisor for specified virtual machine
+#
+#  Input: ${1}               - The identifier of hypervisor
+#         ${2}               - The identifier of virtual machine on hypervisor
+#         ${temp_dir}        - The temporary directory to save cache files
+# Modify: ${vm_tools_status} - The 'vmware-tools' running status ('toolsOk' or another)
+#
+function get_vm_tools_status {
+  local \
+    esxi_id="${1}" \
+    vm_esxi_id="${2}"
+  local \
+    vm_tools_status_filepath="${temp_dir}/vm_tools_status"
+
+  run_on_hypervisor \
+  >"${vm_tools_status_filepath}" \
+    "${esxi_id}" \
+    "ssh" \
+    "set -o pipefail" \
+    "vim-cmd vmsvc/get.guest \"${vm_esxi_id}\" | grep toolsStatus" \
+    "|| Failed to get guest information (vim-cmd vmsvc/get.guest)" \
+  || return 1
+
+  if ! \
+    read -r \
+      vm_tools_status \
+    <"${vm_tools_status_filepath}"
+  then
+    skipping \
+      "Failed to get virtual machine 'vmware-tools' status information from '${vm_tools_status_filepath}' file"
+    return 1
+  elif [[ ! "${vm_tools_status}" =~ ^[[:blank:]]*toolsStatus[[:blank:]]*=[[:blank:]]*\"(.*)\",[[:blank:]]*$ ]]
+  then
+    skipping \
+      "Cannot parse the 'vmware-tools' status information obtained from hypervisor" \
+      "--> ${vm_tools_status}"
+    return 1
+  fi
+
+  vm_tools_status="${BASH_REMATCH[1]}"
 
   return 0
 }
@@ -3826,6 +3847,7 @@ function command_update {
     vm_id="" \
     vm_name="" \
     vm_real_id="" \
+    vm_tools_status="" \
     updated_vms=0
 
   for vm_id in "${my_vm_ids_ordered[@]}"
@@ -3901,6 +3923,19 @@ function command_update {
       continue
     fi
 
+    get_vm_tools_status \
+      "${esxi_id}" \
+      "${my_params[${vm_real_id}.vm_esxi_id]}" \
+    || continue
+
+    if [ "${vm_tools_status}" != "toolsOk" ]
+    then
+      skipping \
+        "Update operation requires installed and running 'vmware-tools' on the virtual machine" \
+        "because the 'eject' command is required in the virtual machine environment"
+      continue
+    fi
+
     get_iso_id \
     || continue
 
@@ -3957,7 +3992,7 @@ function command_update {
       continue
     fi
 
-    progress "Update the '${update_param}' parameter (govc device.cdrom.insert)"
+    progress "Update the '${update_param#special.}' parameter (govc device.cdrom.insert)"
     if ! \
       GOVC_USERNAME="${params[esxi_ssh_username]}" \
       GOVC_PASSWORD="${params[esxi_ssh_password]}" \
