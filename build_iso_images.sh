@@ -228,6 +228,21 @@ function build_base_layer {
       base_layers_tar_paths+=("ERROR")
       return 1
     fi
+
+    progress "Calculate the checksum of '${base_layer_name}' base layer (sha1sum)"
+    pushd "${base_layer_tar_path%/*}" >/dev/null
+    if ! \
+      sha1sum \
+        "${base_layer_tar_path##*/}" \
+      >"${base_layer_tar_path##*/}.sha1"
+    then
+      popd >/dev/null
+      skipping \
+        "Unable to calculate the checksum of '${base_layer_name}' base layer"
+      base_layers_tar_paths+=("ERROR")
+      return 1
+    fi
+    popd >/dev/null
   fi
 
   base_layers_tar_paths+=("${base_layer_tar_path}")
@@ -678,6 +693,10 @@ function command_build {
     base_layers_tar_paths=() \
     base_layer_pre_image_script_path="" \
     base_layer_pre_image_script_hash="" \
+    base_layer_real_sha1sum="" \
+    base_layer_real_sha1sum_path="" \
+    base_layer_sha1sum="" \
+    base_layer_sha1sum_path="" \
     base_layer_tar_path="" \
     build_id="" \
     build_name="" \
@@ -692,6 +711,7 @@ function command_build {
     image_version_source="" \
     repo_dir="" \
     repo_head_short_hash="" \
+    sha1sum=""
 
   for build_id in "${my_builds_ids_ordered[@]}"
   do
@@ -706,6 +726,8 @@ function command_build {
     base_layer_dir="${my_base_layers_dir}/${params[base_layer]}"
     base_layer_tar_path=$(get_base_layer_tar_path "${params[base_layer]}")
     base_layer_pre_image_script_path="${base_layer_dir}/.pre_image.sh"
+    base_layer_real_sha1sum_path="${temp_dir}/builds/${build_name}/sha1sum"
+    base_layer_sha1sum_path="${base_layer_tar_path}.sha1"
     chroot_dir="${temp_dir}/builds/${build_name}/chroot"
     image_dir="${temp_dir}/builds/${build_name}/image"
     image_version_source="${base_layer_tar_path##*/}"
@@ -726,6 +748,40 @@ function command_build {
       skipping \
         "Failed to create 'chroot' and 'image' directories"
       continue
+    fi
+
+    if [ -f "${base_layer_sha1sum_path}" ]
+    then
+      progress "Read the checksum from '${base_layer_sha1sum_path}' file"
+      read_sha1sum \
+        "${base_layer_sha1sum_path}" \
+      || continue
+
+      base_layer_sha1sum="${sha1sum}"
+
+      progress "Calculate the checksum of '${params[base_layer]}' base layer (sha1sum)"
+      if ! \
+        sha1sum \
+          "${base_layer_tar_path}" \
+        >"${base_layer_real_sha1sum_path}"
+      then
+        skipping \
+          "Unable to calculate the checksum of '${params[base_layer]}'"
+        continue
+      fi
+
+      read_sha1sum \
+        "${base_layer_real_sha1sum_path}" \
+      || continue
+
+      base_layer_real_sha1sum="${sha1sum}"
+
+      if [ "${base_layer_real_sha1sum}" != "${base_layer_sha1sum}" ]
+      then
+        skipping \
+          "The calculated checksum of '${params[base_layer]}' base layer don't equal to checksum in .sha1 file"
+        continue
+      fi
     fi
 
     progress "Unarchive the base layer '${params[base_layer]}' (tar)"

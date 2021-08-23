@@ -436,6 +436,38 @@ function remove_temp_dir {
   return 0
 }
 
+# Function to read the sha1-sum from the first string in file
+#
+#  Input: ${1}       - The path to file from which the sha1-sum will be read
+# Modify: ${sha1sum} - The sha1-sum readed from the first string in file
+# Return: 0          - Always
+#
+function read_sha1sum {
+  local \
+    sha1sum_str="" \
+    sha1sum_path="${1}"
+
+  if ! \
+    read -r \
+      sha1sum_str \
+    <"${sha1sum_path}"
+  then
+    skipping \
+      "Unable to read the checksum string from '${sha1sum_path}' file"
+    return 1
+  elif [[ ! "${sha1sum_str}" =~ ^([0-9a-f]{40})[[:blank:]]+(.*)$ ]]
+  then
+    skipping \
+      "Unable to parse the checksum string from '${sha1sum_path}' file" \
+      "${sha1sum_str}"
+    return 1
+  else
+    sha1sum="${BASH_REMATCH[1]}"
+  fi
+
+  return 0
+}
+
 # Function to run command
 #
 #  Input: ${1}   - The command name for which the 'command_${1}' function must exists
