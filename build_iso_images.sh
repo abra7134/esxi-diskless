@@ -50,7 +50,7 @@ declare -A \
     [0.repo_clone_into]="repo/"
     [0.repo_depth]=1
     [0.run_from_repo]="/deploy.sh"
-  ) ]
+  )
   my_builds_list=()
 
 # ${my_options[@]}      - Array with options which were specified on the command line
