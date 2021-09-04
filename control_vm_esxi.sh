@@ -946,18 +946,32 @@ function get_real_vm_list {
         if [[ "${filesystems_map_str}" =~ ^("Mount "|"-------") ]]
         then
           continue
-        elif [[ ! "${filesystems_map_str}" =~ ^"/vmfs/volumes/"([[:alnum:]_\/\.\-]+)[[:blank:]]+([[:alnum:]_\.\-]*)[[:blank:]]+[[:alnum:]]{8}-[[:alnum:]]{8}-[[:alnum:]]{4}-[[:alnum:]]{12}[[:blank:]]+ ]]
+        elif [[ ! "${filesystems_map_str}" =~ ^"/vmfs/volumes/"([a-f0-9-]+)[[:blank:]]+([[:alnum:]_\.\-]*)[[:blank:]]+([a-f0-9-]+)[[:blank:]]+ ]]
         then
           skipping \
-            "Cannot parse the '${filesystems_map_str}' filesystems string obtained from hypervisor"
+            "Cannot parse the filesystems string obtained from hypervisor" \
+            "--> ${filesystems_map_str}"
           continue 2
         fi
 
         filesystem_uuid="${BASH_REMATCH[1]}"
         filesystem_name="${BASH_REMATCH[2]}"
-        let filesystem_id+=1
-        filesystems_names[${filesystem_id}]="${filesystem_name}"
-        filesystems_uuids[${filesystem_id}]="${filesystem_uuid}"
+
+        if [ -n "${filesystem_name}" ]
+        then
+          if [ "${filesystem_uuid}" != "${BASH_REMATCH[3]}" ]
+          then
+            skipping \
+              "Different UUID filesystem values in path and separate field" \
+              "--> ${filesystems_map_str}"
+            continue 2
+          fi
+
+          let filesystem_id+=1
+          filesystems_names[${filesystem_id}]="${filesystem_name}"
+          filesystems_uuids[${filesystem_id}]="${filesystem_uuid}"
+        fi
+
       done \
       5<"${filesystems_map_filepath}"
     fi
@@ -996,7 +1010,8 @@ function get_real_vm_list {
         elif [[ ! "${vms_map_str}" =~ ^([[:digit:]]+)[[:blank:]]+([[:alnum:]_\.\-]+)[[:blank:]]+\[([[:alnum:]_\.\-]+)\][[:blank:]]+([[:alnum:]_\/\.\-]+\.vmx)[[:blank:]]+(.*)$ ]]
         then
           skipping \
-            "Cannot parse the '${vms_map_str}' vms string obtained from hypervisor"
+            "Cannot parse the vms string obtained from hypervisor" \
+            "--> ${vms_map_str}"
           continue 2
         fi
 
@@ -1076,7 +1091,8 @@ function get_real_vm_list {
                 fi
               else
                 skipping \
-                  "Cannot parse the '${vmx_str}' vmx string obtained from hypervisor"
+                  "Cannot parse the vmx string obtained from hypervisor" \
+                  "${vmx_str}"
                 continue 3
               fi
             done \
