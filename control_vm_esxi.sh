@@ -1061,7 +1061,7 @@ function get_real_vm_list {
             do
               if [[ "${vmx_str}" =~ ^([[:alnum:]_:\.]+)[[:blank:]]+=[[:blank:]]+\"(.*)\"$ ]]
               then
-                vmx_param_name="${BASH_REMATCH[1]}"
+                vmx_param_name="${BASH_REMATCH[1],,}"
                 if [ -v my_params_map[${vmx_param_name}] ]
                 then
                   vmx_param_value="${BASH_REMATCH[2]}"
@@ -1069,7 +1069,11 @@ function get_real_vm_list {
                 elif [ "${vmx_param_name}" = "ide0:0.fileName" ]
                 then
                   vmx_param_value="${BASH_REMATCH[2]}"
-                  if [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)$ ]]
+                  # This value occurs when specified a host-based CD-ROM
+                  if [ "${vmx_param_value}" = "emptyBackingString" ]
+                  then
+                    :
+                  elif [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)$ ]]
                   then
                     filesystem_name="${BASH_REMATCH[1]}"
                     for filesystem_id in "${!filesystems_uuids[@]}"
@@ -1097,6 +1101,11 @@ function get_real_vm_list {
               fi
             done \
             6<"${vmx_filepath}"
+
+            if [ -z "${my_params[${real_vm_id}.special.vm_esxi_datastore]}" ]
+            then
+              my_params[${real_vm_id}.special.vm_esxi_datastore]="${my_params[${real_vm_id}.vm_esxi_datastore]}"
+            fi
           fi
         fi
       done \
