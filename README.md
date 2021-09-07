@@ -73,3 +73,4 @@ $ docker run --rm -v `pwd`:/build esxi-diskless ./control_vm_esxi.sh
 
 * [По скрипту `build_iso_images.sh`](docs/BUILD_ISO_IMAGES.md)
 * [По скрипту `control_vm_esxi.sh`](docs/CONTROL_VM_ESXI.md)
+* [Примеры использования](docs/EXAMPLES.md)
