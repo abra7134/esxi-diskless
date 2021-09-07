@@ -1066,11 +1066,12 @@ function get_real_vm_list {
                 then
                   vmx_param_value="${BASH_REMATCH[2]}"
                   my_params[${real_vm_id}.${vmx_param_name}]="${vmx_param_value}"
-                elif [ "${vmx_param_name}" = "ide0:0.fileName" ]
+                elif [ "${vmx_param_name}" = "ide0:0.filename" ]
                 then
                   vmx_param_value="${BASH_REMATCH[2]}"
                   # This value occurs when specified a host-based CD-ROM
-                  if [ "${vmx_param_value}" = "emptyBackingString" ]
+                  if [    "${vmx_param_value}" = "emptyBackingString" \
+                       -o "${vmx_param_value}" = "auto detect" ]
                   then
                     :
                   elif [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)$ ]]
