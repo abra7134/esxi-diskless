@@ -68,6 +68,7 @@ declare -A \
     [0.vm_ipv4_address]="REQUIRED"
     [0.vm_ipv4_netmask]="255.255.255.0"
     [0.vm_ipv4_gateway]="REQUIRED"
+    [0.vm_mac_address]="auto"
     [0.vm_memory_mb]="1024"
     [0.vm_network_name]="VM Network"
     [0.vm_ssh_password]=""
@@ -1293,15 +1294,15 @@ function parse_ini_file {
         || \
           error="it must be 'yes' or 'no' value"
         ;;
-      "vm_ipv4_address"|"vm_ipv4_gateway" )
-        [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
-        || \
-          error="it must be the correct IPv4 address (in x.x.x.x format)"
-        ;;
       "vm_dns_servers" )
         [[ "${value// /.}." =~ ^(((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4})+$ ]] \
         || \
           error="it must be the correct list of IPv4 address (in x.x.x.x format) delimeted by spaces"
+        ;;
+      "vm_ipv4_address"|"vm_ipv4_gateway" )
+        [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
+        || \
+          error="it must be the correct IPv4 address (in x.x.x.x format)"
         ;;
       "vm_ipv4_netmask" )
         [[    "${value}" =~ ^255\.255\.255\.(255|254|252|248|240|224|192|128|0)$
@@ -1310,6 +1311,12 @@ function parse_ini_file {
            || "${value}" =~ ^(255|254|252|248|240|224|192|128|0)\.0\.0\.0$ ]] \
         || \
           error="it must be the correct IPv4 netmask (in x.x.x.x format)"
+        ;;
+      "vm_mac_address" )
+        [[    "${value}" == "auto"
+           || "${value}:" =~ ^([0-9A-Fa-f]{2}:){6}$ ]] \
+        || \
+          error="it must a 'auto' value or the correct MAC-address (in xx:xx:xx:xx:xx:xx format)"
         ;;
       "vm_memory_mb" )
         [[    "${value}" =~ ^[[:digit:]]+$
@@ -3054,7 +3061,6 @@ function command_create {
       [cleanshutdown]="TRUE"
       [config.version]="8"
       [displayname]="${vm_name}"
-      [ethernet0.addresstype]="generated"
       [ethernet0.pcislotnumber]="33"
       [ethernet0.present]="TRUE"
       [ethernet0.virtualdev]="vmxnet3"
@@ -3116,6 +3122,14 @@ function command_create {
         vmx_params[${vmx_param}]="${params[${my_params_map[${vmx_param}]}]}"
       fi
     done
+
+    if [ ${params[vm_mac_address]} = "auto" ]
+    then
+      vmx_params[ethernet0.addresstype]="generated"
+    else
+      vmx_params[ethernet0.address]="${params[vm_mac_address]}"
+      vmx_params[ethernet0.addresstype]="static"
+    fi
 
     vmx_filepath="${temp_dir}/${vm_name}.vmx"
     for param in "${!vmx_params[@]}"
@@ -3602,6 +3616,9 @@ function command_ls {
           "    vm_network_name=\"%s\" vm_dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
           "$(print_param vm_dns_servers ${vm_id})"
+        printf -- \
+          "    vm_mac_address=\"%s\"\n" \
+          "$(print_param vm_mac_address ${vm_id})"
         printf -- \
           "    vm_ipv4_gateway=\"%s\" vm_ipv4_netmask=\"%s\"\n" \
           "$(print_param vm_ipv4_gateway ${vm_id})" \
