@@ -4129,7 +4129,11 @@ function command_update {
         -u="https://${params[esxi_hostname]}" \
         -vm="${vm_name}" \
         /usr/bin/eject --manualeject off /dev/cdrom \
-        \&\& /usr/bin/eject /dev/cdrom
+        \&\& \
+          if /usr/bin/head -c1 /dev/cdrom \&\>/dev/null\; \
+          then \
+            /usr/bin/eject /dev/cdrom\; \
+          fi
     then
       skipping \
         "Unable to eject the ISO-image from virtual machine's CD-ROM"
