@@ -64,7 +64,7 @@ v1.210316
 
 ### control_vm_esxi.sh
 
-v3.??????
+v3.211116
 - Исправлена ошибка `unable to eject, last error: Inappropriate ioctl for device`,
   при попытке извлечения уже извлеченного образа из виртуального CD-ROM
 - Добавлен новый параметр `vm_mac_address` для указания MAC-адреса виртуальной машины
