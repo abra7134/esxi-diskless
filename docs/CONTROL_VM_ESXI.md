@@ -337,6 +337,7 @@ $ ./control_vm_esxi.sh upload all
 #vm_ipv4_address=""                # REQUIRED
 #vm_ipv4_netmask="255.255.255.0"
 #vm_ipv4_gateway=""                # REQUIRED
+#vm_mac_address="auto"
 #vm_memory_mb=1024
 #vm_network_name="VM Network"
 #vm_ssh_password=""
@@ -413,6 +414,7 @@ vm-example12 at="esxi2" \
 | **vm_ipv4_address** | IPv4-адрес для виртуальной машины | ОБЯЗАТЕЛЬНЫЙ |
 | **vm_ipv4_netmask** | IPv4-маска для виртуальной машины | 255.255.255.0 |
 | **vm_ipv4_gateway** | IPv4-шлюз для виртуальной машины | ОБЯЗАТЕЛЬНЫЙ |
+| **vm_mac_address** | MAC-адрес для виртуальной машины | auto |
 | **vm_memory_mb** | Количество оперативной памяти для виртуальной машины в мегабайтах | 1024 |
 | **vm_network_name** | Имя сети на гипервизоре, к которой будет подключена виртуальная машина | VM Network |
 | **vm_ssh_password** | SSH-пароль для доступа к виртуальной машине | |

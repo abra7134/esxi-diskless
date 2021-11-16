@@ -91,6 +91,7 @@ esxi3 \
 vm-example10 at="esxi2" \
   vm_autostart="yes" \
   vm_ipv4_address="127.0.0.11" \
+  vm_mac_address="00:01:02-03:04:05" \
   vm_memory_mb=2048
 
 vm1-example11 at="esxi3" vm_ipv4_address="127.0.0.12"

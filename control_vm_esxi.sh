@@ -126,6 +126,7 @@ declare -A \
     [numvcpus]="vm_vcpus"
     [special.vm_autostart]="vm_autostart"
     [special.vm_esxi_datastore]="vm_esxi_datastore"
+    [special.vm_mac_address]="vm_mac_address"
     [special.local_iso_path]="local_iso_path"
   )
 
@@ -603,6 +604,7 @@ function esxi_vm_simple_command {
     if [ "${vm_operation}" = "destroy" ]
     then
       my_params[${real_vm_id}.status]="destroyed"
+      sleep 1
     fi
   fi
 
@@ -1063,13 +1065,21 @@ function get_real_vm_list {
               if [[ "${vmx_str}" =~ ^([[:alnum:]_:\.]+)[[:blank:]]+=[[:blank:]]+\"(.*)\"$ ]]
               then
                 vmx_param_name="${BASH_REMATCH[1],,}"
+                vmx_param_value="${BASH_REMATCH[2]}"
+
                 if [ -v my_params_map[${vmx_param_name}] ]
                 then
-                  vmx_param_value="${BASH_REMATCH[2]}"
                   my_params[${real_vm_id}.${vmx_param_name}]="${vmx_param_value}"
+                elif [    "${vmx_param_name}" = "ethernet0.addresstype" \
+                       -a "${vmx_param_value}" = "generated" ]
+                then
+                  my_params[${real_vm_id}.special.vm_mac_address]="auto"
+                elif [    "${vmx_param_name}" = "ethernet0.address" \
+                       -a "${my_params[${real_vm_id}.special.vm_mac_address]}" != "auto" ]
+                then
+                  my_params[${real_vm_id}.special.vm_mac_address]="${vmx_param_value^^}"
                 elif [ "${vmx_param_name}" = "ide0:0.filename" ]
                 then
-                  vmx_param_value="${BASH_REMATCH[2]}"
                   # This value occurs when specified a host-based CD-ROM
                   if [    "${vmx_param_value}" = "emptyBackingString" \
                        -o "${vmx_param_value}" = "auto detect" ]
@@ -1314,9 +1324,9 @@ function parse_ini_file {
         ;;
       "vm_mac_address" )
         [[    "${value}" == "auto"
-           || "${value}:" =~ ^([0-9A-Fa-f]{2}:){6}$ ]] \
+           || "${value}:" =~ ^([0-9A-Fa-f]{2}(:|-)?){6}$ ]] \
         || \
-          error="it must a 'auto' value or the correct MAC-address (in xx:xx:xx:xx:xx:xx format)"
+          error="it must a 'auto' value or the correct MAC-address (in any format)"
         ;;
       "vm_memory_mb" )
         [[    "${value}" =~ ^[[:digit:]]+$
@@ -1594,6 +1604,24 @@ function parse_ini_file {
         check_param_value \
           "${config_parameter}" \
           "${config_value}"
+
+        # Normalize the MAC-address
+        if [    "${config_parameter}" = "vm_mac_address" \
+             -a "${config_value}" != "auto" ]
+        then
+          config_value="${config_value//[:-]/}"
+          config_value="${config_value^^}"
+          printf \
+            -v config_value \
+            "%s:%s:%s:%s:%s:%s" \
+            "${config_value:0:2}" \
+            "${config_value:2:2}" \
+            "${config_value:4:2}" \
+            "${config_value:6:2}" \
+            "${config_value:8:2}" \
+            "${config_value:10:2}"
+        fi
+
         my_params[${my_params_last_id}.${config_parameter}]="${config_value}"
 
         # If line ending with '\' symbol, associate the parameters from next line with current ${my_params_last_id}
