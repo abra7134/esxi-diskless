@@ -89,6 +89,7 @@ declare -A \
   my_options=() \
   my_options_desc=(
     [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
+    [-da]="Don't enable hypervisor's autostart manager automatically if it's disabled"
     [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
     [-ff]="Force check checksums for existed ISO-images on hypervisor"
     [-fr]="Force reboot (use reset instead) if 'vmware-tools' package is not installed"
@@ -101,18 +102,19 @@ declare -A \
   )
 
 # ${my_esxi_autostart_params[@]} - The list with supported parameters of autostart manager on ESXi
-#                                  Keys - the paramter name, Values - empty
+#                                  Keys - the parameter name
+#                                  Values - default values for automatically enabled autostart manager
 # ${my_params_map[@]}            - The map of parameters between configuration file and ESXi VMX file
 #                                  Keys - the parameter name in VMX file
 #                                        The 'special.' prefix signals that the conversion is not direct
 #                                  Values - the parameter name in configuration file of this script
 declare -A \
   my_esxi_autostart_params=(
-    [enabled]=""
-    [startDelay]=""
-    [stopDelay]=""
-    [waitForHeartbeat]=""
-    [stopAction]=""
+    [enabled]="true"
+    [startDelay]="15s"
+    [stopDelay]="15s"
+    [waitForHeartbeat]="true"
+    [stopAction]="systemDefault"
   ) \
   my_params_map=(
     [ethernet0.networkname]="vm_network_name"
@@ -604,7 +606,6 @@ function esxi_vm_simple_command {
     if [ "${vm_operation}" = "destroy" ]
     then
       my_params[${real_vm_id}.status]="destroyed"
-      sleep 1
     fi
   fi
 
@@ -2912,7 +2913,7 @@ function command_create {
   fi
 
   local \
-    supported_my_options=("-d" "-f" "-ff" "-fs" "-i" "-n" "-sn" "-sr" "-t")
+    supported_my_options=("-d" "-da" "-f" "-ff" "-fs" "-i" "-n" "-sn" "-sr" "-t")
 
   if [ "${#}" -lt 1 ]
   then
@@ -3045,28 +3046,59 @@ function command_create {
 
     my_params[${another_vm_real_id}.vm_id]="${vm_id}"
 
-    if [    "${params[vm_autostart]}" = "yes" \
-         -a "${params[esxi_autostart_enabled]}" != "true" ]
+    if [ "${params[vm_autostart]}" = "yes" ]
     then
-      # Clear the cache in advance,
-      # since it is very likely to change the settings of the autostart manager after next message
-      remove_cachefile_for \
-        "${esxi_id}" \
-        autostart_defaults
-      skipping \
-        "The 'vm_autostart' parameter is specified, but on hypervisor autostart manager is off" \
-        "Turn on the autostart manager on hypervisor and try again"
-      continue
-    else
-      for autostart_param in "${!my_esxi_autostart_params[@]}"
-      do
-        if [ ! -v params[esxi_autostart_${autostart_param,,}] ]
+      if [ "${params[esxi_autostart_enabled]}" = "true" ]
+      then
+        for autostart_param in "${!my_esxi_autostart_params[@]}"
+        do
+          if [ ! -v params[esxi_autostart_${autostart_param,,}] ]
+          then
+            skipping \
+              "Cannot get autostart manager default setting '${autostart_param}' from hypervisor"
+            continue 2
+          fi
+        done
+      else
+        # Clear the cache in advance,
+        # since it is very likely to change the settings of the autostart manager after next message
+        remove_cachefile_for \
+          "${esxi_id}" \
+          autostart_defaults
+
+        if [ "${my_options[-da]}" = "yes" ]
         then
           skipping \
-            "Cannot get autostart manager default setting '${autostart_param}' from hypervisor"
-          continue 2
+            "The 'vm_autostart' parameter is specified, but on hypervisor autostart manager is off" \
+            "Turn on the autostart manager on hypervisor manually and try again (or don't use the '-da' option)"
+          continue
+        else
+          progress "Enable the auto-start manager on hypervisor (vim-cmd hostsvc/autostartmanager/enable_autostart)"
+
+          for autostart_param in "${!my_esxi_autostart_params[@]}"
+          do
+            if [ "${autostart_param}" != "enabled" ]
+            then
+              echo "    ${autostart_param}='${my_esxi_autostart_params[${autostart_param}]}'"
+            fi
+          done
+
+          run_on_hypervisor \
+            "${esxi_id}" \
+            "ssh" \
+            "vim-cmd hostsvc/autostartmanager/enable_autostart true >/dev/null" \
+            "|| Failed to enable autostart manager on hypervisor" \
+            "vim-cmd hostsvc/autostartmanager/update_defaults ${my_esxi_autostart_params[startDelay]} ${my_esxi_autostart_params[stopDelay]} ${my_esxi_autostart_params[stopAction]} ${my_esxi_autostart_params[waitForHeartbeat]} >/dev/null" \
+            "|| Failed to update the autostart settings on hypervisor" \
+          || continue
+
+          for autostart_param in "${!my_esxi_autostart_params[@]}"
+          do
+            my_params[${esxi_id}.esxi_autostart_${autostart_param,,}]="${my_esxi_autostart_params[${autostart_param}]}"
+            params[esxi_autostart_${autostart_param,,}]="${my_esxi_autostart_params[${autostart_param}]}"
+          done
         fi
-      done
+      fi
     fi
 
     get_iso_id \
@@ -3082,6 +3114,9 @@ function command_create {
       || continue
 
       vm_recreated="yes"
+
+      # To avoid errors like: "The directory '/vmfs/volumes/hdd1/test' is already exist on hypervisor"
+      sleep 10
     fi
 
     progress "Check the amount of free RAM on the hypervisor (vsish get /memory/comprehensive)"
