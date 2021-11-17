@@ -988,8 +988,8 @@ function get_real_vm_list {
         "${vms_map_filepath}" \
         "${esxi_id}" \
         "ssh" \
-        "type -f awk cat grep mkdir vim-cmd >/dev/null" \
-        "|| Don't find one of required commands on hypervisor: awk, cat, grep, mkdir or vim-cmd" \
+        "type -f awk cat grep mkdir vim-cmd vsish >/dev/null" \
+        "|| Don't find one of required commands on hypervisor: awk, cat, grep, mkdir, vim-cmd or vsish" \
         "vim-cmd vmsvc/getallvms" \
         "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)"
     then
@@ -2943,6 +2943,8 @@ function command_create {
     another_esxi_id="" \
     another_vm_real_id="" \
     autostart_param="" \
+    esxi_free_memory_kb="" \
+    esxi_free_memory_filepath="" \
     esxi_id="" \
     esxi_name="" \
     iso_id="" \
@@ -2960,6 +2962,7 @@ function command_create {
     vmx_params=""
 
   vm_id_filepath="${temp_dir}/vm_id"
+  esxi_free_memory_filepath="${temp_dir}/esxi_free_memory"
 
   for vm_id in "${my_vm_ids_ordered[@]}"
   do
@@ -3079,6 +3082,31 @@ function command_create {
       || continue
 
       vm_recreated="yes"
+    fi
+
+    progress "Check the amount of free RAM on the hypervisor (vsish get /memory/comprehensive)"
+    run_on_hypervisor \
+    >"${esxi_free_memory_filepath}" \
+      "${esxi_id}" \
+      "ssh" \
+      "set -o pipefail" \
+      "vsish -d -e get /memory/comprehensive | awk '{ print \$12; exit; }'" \
+      "|| Failed to get the memory usage on hypervisor (vsish get /memory/comprehensive)" \
+    || continue
+
+    if ! \
+      read -r \
+        esxi_free_memory_kb \
+      <"${esxi_free_memory_filepath}"
+    then
+      skipping \
+        "Failed to get hypervisor's free memory from '${esxi_free_memory_filepath}' file"
+      continue
+    elif [ $((esxi_free_memory_kb/1024)) -lt $((params[vm_memory_mb])) ]
+    then
+      skipping \
+        "Not enough free RAM on the hypervisor (need ${params[vm_memory_mb]}Mb, but free only $((esxi_free_memory_kb/1024))Mb)"
+      continue
     fi
 
     progress "Prepare a virtual machine configuration file .vmx (in ${temp_dir} directory)"
