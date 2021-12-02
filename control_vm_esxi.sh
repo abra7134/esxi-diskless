@@ -3125,7 +3125,7 @@ function command_create {
       "${esxi_id}" \
       "ssh" \
       "set -o pipefail" \
-      "vsish -d -e get /memory/comprehensive | awk '{ print \$12; exit; }'" \
+      "vsish -e get /memory/comprehensive | sed --silent '/^[[:space:]]\+Free:\([[:digit:]]\+\) KB$/s//\1/p'" \
       "|| Failed to get the memory usage on hypervisor (vsish get /memory/comprehensive)" \
     || continue
 
