@@ -989,8 +989,8 @@ function get_real_vm_list {
         "${vms_map_filepath}" \
         "${esxi_id}" \
         "ssh" \
-        "type -f awk cat grep mkdir vim-cmd vsish >/dev/null" \
-        "|| Don't find one of required commands on hypervisor: awk, cat, grep, mkdir, vim-cmd or vsish" \
+        "type -f awk cat grep mkdir sed vim-cmd vsish >/dev/null" \
+        "|| Don't find one of required commands on hypervisor: awk, cat, grep, mkdir, sed, vim-cmd or vsish" \
         "vim-cmd vmsvc/getallvms" \
         "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)"
     then
