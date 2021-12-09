@@ -25,11 +25,14 @@ my_dir="${0%/*}"
 #                                    ${name} - the parameter name
 # ${my_params_last_id}      - The identifier of last recorded resource
 # ${my_config_esxi_list[@]} - List of esxi hypervisors filled from configuration file
-#                             Keys - the hypervisor identifier, Values - the hypervisor name
+#                             Keys - the hypervisor identifier
+#                             Values - the hypervisor name
 # ${my_config_vm_list[@]}   - List of virtual machines filled from configuration file
-#                             Keys - the virtual machine identifier, Values - the virtual machine name
+#                             Keys - the virtual machine identifier
+#                             Values - the virtual machine name
 # ${my_real_vm_list[@]}     - List of real virtual machines filled from hypervisors
-#                             Keys - the real virtual machine identifier, Values - the virtual machine name
+#                             Keys - the real virtual machine identifier
+#                             Values - the virtual machine name
 #
 # for example:
 #
@@ -82,9 +85,11 @@ declare -A \
   my_real_vm_list=()
 
 # ${my_options[@]}      - Array with options which were specified on the command line
-#                         Keys - the command line option name, Values - "yes" string
+#                         Keys - the command line option name
+#                         Values - "yes" string
 # ${my_options_desc[@]} - Array with all supported command line options and them descriptions
-#                         Keys - the command line option name, Values - the option description
+#                         Keys - the command line option name
+#                         Values - the option description
 declare -A \
   my_options=() \
   my_options_desc=(
@@ -108,6 +113,8 @@ declare -A \
 #                                  Keys - the parameter name in VMX file
 #                                        The 'special.' prefix signals that the conversion is not direct
 #                                  Values - the parameter name in configuration file of this script
+# ${my_updated_params[@]}        - The array of parameter names that the script can update
+#
 declare -A \
   my_esxi_autostart_params=(
     [enabled]="true"
@@ -130,6 +137,13 @@ declare -A \
     [special.vm_esxi_datastore]="vm_esxi_datastore"
     [special.vm_mac_address]="vm_mac_address"
     [special.local_iso_path]="local_iso_path"
+  )
+
+declare \
+  my_updated_params=(
+    "local_iso_path"
+    "vm_dns_servers"
+    "vm_timezone"
   )
 
 # ${my_*_ids[@]}         - Arrays with statuses of processed hypervisors, virtual machines or ISO-images
@@ -2425,6 +2439,7 @@ function run_on_hypervisor {
 #         ${my_vm_ids_ordered[@]}      - GLOBAL (see description at top)
 #         ${vm_id}                     - The identifier the current processed virtual machine
 #                                        for cases where the process is interrupted
+#         ${update_param}              - The name of updated parameter (for 'update' command only)
 # Return: 0                            - Always
 #
 function show_processed_status {
@@ -2560,6 +2575,14 @@ function show_processed_status {
       "since '.sha1' files may contain incorrect information" \
       "" \
       "For accurate validation of loaded ISO images please do not use the '-ff' and '-t' options together"
+  fi
+
+  if [ -n "${update_param}" \
+       -a "${update_param}" != "local_iso_path" ]
+  then
+    attention \
+      "Updating the '${update_param}' parameter gives only a DELAYED effect !!!" \
+      "Restart of virtual machines is REQUIRED !!!"
   fi
 
   if [ "${#my_failed_remove_files[@]}" -gt 0 ]
@@ -3773,7 +3796,8 @@ function command_show {
 
   echo -e "${COLOR_NORMAL}"
   echo "Showing differences:"
-  echo -e "(virtual machine names are ${COLOR_WHITE}highlighted${COLOR_NORMAL} when specified explicitly or indirectly on the command line)"
+  echo -e "(Virtual machine names are ${COLOR_WHITE}highlighted${COLOR_NORMAL} when specified explicitly or indirectly on the command line)"
+  echo -e "(Parameters with suffix '**' in name may not be relevant because it has deferred write support)"
   echo
 
   local -A \
@@ -3941,6 +3965,15 @@ function command_show {
                   real_value="(NOT FOUND)"
                 fi
 
+                if [ "${config_param}" != "local_iso_path" ] \
+                   && \
+                    finded_duplicate \
+                      "${config_param}" \
+                      "${my_updated_params[@]}"
+                then
+                  config_param+=" **"
+                fi
+
                 printf -- \
                   "   ${color_difference}%-${column_width}s > %-${column_width}s < %-${column_width}s${COLOR_NORMAL}\n" \
                   "${config_value}" \
@@ -4031,8 +4064,7 @@ function command_update {
   fi
 
   local \
-    supported_my_options=("-ff" "-i" "-n" "-sn" "-sr" "-t") \
-    supported_update_params=("local_iso_path")
+    supported_my_options=("-ff" "-i" "-n" "-sn" "-sr" "-t")
 
   if [ "${#}" -lt 1 ]
   then
@@ -4043,15 +4075,15 @@ function command_update {
       "Usage: ${my_name} ${command_name} <parameter_name> [options] <vm_name> [<esxi_name>] [<vm_name>] ..." \
       "" \
       "Supported parameter names:" \
-      "${supported_update_params[@]/#/* }"
+      "${my_updated_params[@]/#/ * }"
   elif ! \
     finded_duplicate \
       "${1}" \
-      "${supported_update_params[@]}"
+      "${my_updated_params[@]}"
   then
     warning \
       "The '${command_name}' command only supports updating values of the following parameters:" \
-      "${supported_update_params[@]/#/* }" \
+      "${my_updated_params[@]/#/ * }" \
       "" \
       "Please specify a correct parameter name and try again"
   fi
@@ -4066,6 +4098,22 @@ function command_update {
 
   [ "${update_param}" = "local_iso_path" ] \
   && upload_isos
+
+  local \
+    param_name="" \
+    update_param_mapped=""
+
+  for param_name in "${!my_params_map[@]}"
+  do
+    if [ "${my_params_map[${param_name}]}" = "${update_param}" ]
+    then
+      update_param_mapped="${param_name}"
+      break
+    fi
+  done
+
+  [ -z "${update_param_mapped}" ] \
+  && internal "Cannot find the '${update_param}' value in \${my_params_map[@]} array"
 
   local -A \
     another_esxi_names=() \
@@ -4146,125 +4194,139 @@ function command_update {
       "${update_param}" \
     || continue
 
-    if [ "${update_param}" = "local_iso_path" ]
-    then
-      update_param="special.${update_param}"
-    fi
-
-    if [ "${params[${update_param#special.}]}" = "${my_params[${vm_real_id}.${update_param}]}" ]
+    if [ "${params[${update_param}]}" = "${my_params[${vm_real_id}.${update_param_mapped}]}" ]
     then
       skipping \
         "No update required, parameter already has the required value"
       continue
     fi
 
-    get_vm_tools_status \
-      "${esxi_id}" \
-      "${my_params[${vm_real_id}.vm_esxi_id]}" \
-    || continue
-
-    if [ "${vm_tools_status}" != "toolsOk" ]
+    if [ "${update_param}" = "local_iso_path" ]
     then
-      skipping \
-        "Update operation requires installed and running 'vmware-tools' on the virtual machine" \
-        "because the 'eject' command is required in the virtual machine environment"
-      continue
-    fi
+      get_vm_tools_status \
+        "${esxi_id}" \
+        "${my_params[${vm_real_id}.vm_esxi_id]}" \
+      || continue
 
-    get_iso_id \
-    || continue
+      if [ "${vm_tools_status}" != "toolsOk" ]
+      then
+        skipping \
+          "Update operation requires installed and running 'vmware-tools' on the virtual machine" \
+          "because the 'eject' command is required in the virtual machine environment"
+        continue
+      fi
 
-    progress "Getting the identifier of virtual CD-ROM (govc device.ls cdrom-*)"
-    if ! \
-      GOVC_USERNAME="${params[esxi_ssh_username]}" \
-      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-      govc \
-      >"${cdrom_id_file}" \
-        device.ls \
-        -dc=ha-datacenter \
-        -k=true \
-        -u="https://${params[esxi_hostname]}" \
-        -vm="${vm_name}" \
-        'cdrom-*'
-    then
-      skipping \
-        "Unable to get the identifier of virtual CD-ROM"
-      continue
-    fi
+      get_iso_id \
+      || continue
 
-    # Read only the first line
-    if ! \
-      read -r \
-      <"${cdrom_id_file}" \
-        cdrom_id \
-        cdrom_type \
-        cdrom_iso_path
-    then
-      skipping \
-        "Failed to read a temporary file with cdrom identifier"
-    elif [ "${cdrom_id#cdrom-}" = "${cdrom_id}" ]
-    then
-      skipping \
-        "Unable to parse the cdrom identifier '${cdrom_id}', it must be prefixed with 'cdrom-'"
-    fi
+      progress "Getting the identifier of virtual CD-ROM (govc device.ls cdrom-*)"
+      if ! \
+        GOVC_USERNAME="${params[esxi_ssh_username]}" \
+        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+        govc \
+        >"${cdrom_id_file}" \
+          device.ls \
+          -dc=ha-datacenter \
+          -k=true \
+          -u="https://${params[esxi_hostname]}" \
+          -vm="${vm_name}" \
+          'cdrom-*'
+      then
+        skipping \
+          "Unable to get the identifier of virtual CD-ROM"
+        continue
+      fi
 
-    progress "Eject the ISO-image from virtual machine's CD-ROM (govc guest.run -l nobody)"
-    if ! \
-      GOVC_USERNAME="${params[esxi_ssh_username]}" \
-      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-      govc \
-        guest.run \
-        -dc=ha-datacenter \
-        -k=true \
-        -l=nobody \
-        -u="https://${params[esxi_hostname]}" \
-        -vm="${vm_name}" \
-        /usr/bin/eject --manualeject off /dev/cdrom \
-        \&\& \
-          if /usr/bin/head -c1 /dev/cdrom \&\>/dev/null\; \
-          then \
-            /usr/bin/eject /dev/cdrom\; \
-          fi
-    then
-      skipping \
-        "Unable to eject the ISO-image from virtual machine's CD-ROM"
-      continue
-    fi
+      # Read only the first line
+      if ! \
+        read -r \
+        <"${cdrom_id_file}" \
+          cdrom_id \
+          cdrom_type \
+          cdrom_iso_path
+      then
+        skipping \
+          "Failed to read a temporary file with cdrom identifier"
+      elif [ "${cdrom_id#cdrom-}" = "${cdrom_id}" ]
+      then
+        skipping \
+          "Unable to parse the cdrom identifier '${cdrom_id}', it must be prefixed with 'cdrom-'"
+      fi
 
-    progress "Update the '${update_param#special.}' parameter (govc device.cdrom.insert)"
-    if ! \
-      GOVC_USERNAME="${params[esxi_ssh_username]}" \
-      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-      govc \
-        device.cdrom.insert \
-        -dc=ha-datacenter \
-        -ds="${params[vm_esxi_datastore]}" \
-        -device="${cdrom_id}" \
-        -k=true \
-        -u="https://${params[esxi_hostname]}" \
-        -vm="${vm_name}" \
-        ".iso/${params[local_iso_path]##*/}"
-    then
-      skipping \
-        "Unable to update the '${update_param#special.}' parameter"
-      continue
-    fi
+      progress "Eject the ISO-image from virtual machine's CD-ROM (govc guest.run -l nobody)"
+      if ! \
+        GOVC_USERNAME="${params[esxi_ssh_username]}" \
+        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+        govc \
+          guest.run \
+          -dc=ha-datacenter \
+          -k=true \
+          -l=nobody \
+          -u="https://${params[esxi_hostname]}" \
+          -vm="${vm_name}" \
+          /usr/bin/eject --manualeject off /dev/cdrom \
+          \&\& \
+            if /usr/bin/head -c1 /dev/cdrom \&\>/dev/null\; \
+            then \
+              /usr/bin/eject /dev/cdrom\; \
+            fi
+      then
+        skipping \
+          "Unable to eject the ISO-image from virtual machine's CD-ROM"
+        continue
+      fi
 
-    progress "Connect the ISO to CDROM (govc device.connect)"
-    if ! \
-      GOVC_USERNAME="${params[esxi_ssh_username]}" \
-      GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-      govc \
-        device.connect \
-        -dc=ha-datacenter \
-        -k=true \
-        -u="https://${params[esxi_hostname]}" \
-        -vm="${vm_name}" \
-        "${cdrom_id}"
-    then
-      skipping \
-        "Unable to connect the ISO to CDROM"
-      continue
+      progress "Update the '${update_param}' parameter (govc device.cdrom.insert)"
+      if ! \
+        GOVC_USERNAME="${params[esxi_ssh_username]}" \
+        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+        govc \
+          device.cdrom.insert \
+          -dc=ha-datacenter \
+          -ds="${params[vm_esxi_datastore]}" \
+          -device="${cdrom_id}" \
+          -k=true \
+          -u="https://${params[esxi_hostname]}" \
+          -vm="${vm_name}" \
+          ".iso/${params[local_iso_path]##*/}"
+      then
+        skipping \
+          "Unable to update the '${update_param}' parameter"
+        continue
+      fi
+
+      progress "Connect the ISO to CDROM (govc device.connect)"
+      if ! \
+        GOVC_USERNAME="${params[esxi_ssh_username]}" \
+        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+        govc \
+          device.connect \
+          -dc=ha-datacenter \
+          -k=true \
+          -u="https://${params[esxi_hostname]}" \
+          -vm="${vm_name}" \
+          "${cdrom_id}"
+      then
+        skipping \
+          "Unable to connect the ISO to CDROM"
+        continue
+      fi
+    else
+      if ! \
+        GOVC_USERNAME="${params[esxi_ssh_username]}" \
+        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+        govc \
+          vm.change \
+          -dc=ha-datacenter \
+          -e="${update_param_mapped}=${params[${update_param}]}" \
+          -k=true \
+          -u="https://${params[esxi_hostname]}" \
+          -vm="${vm_name}"
+      then
+        skipping \
+          "Unable to update the '${update_param}' parameter"
+        continue
+      fi
     fi
 
     echo "    Virtual machine parameter(s) is updated, continue"
@@ -4273,12 +4335,13 @@ function command_update {
       "${vm_real_id}" \
       ""
 
-    my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param#special.}='${params[${update_param#special.}]}')"
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param}='${params[${update_param}]}')"
     my_params[${vm_real_id}.status]="iso updated"
     let updated_vms+=1
   done
 
-  remove_isos
+  [ "${update_param}" = "local_iso_path" ] \
+  && remove_isos
 
   show_processed_status \
     "all" \
