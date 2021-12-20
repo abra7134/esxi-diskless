@@ -482,9 +482,8 @@ function run_command {
   init_colors
 
   printf -- \
-    "${COLOR_NORMAL}${UNDERLINE}%s v%s${COLOR_NORMAL}\n\n" \
-    "${MY_NAME}" \
-    "${MY_VERSION}"
+    "${COLOR_NORMAL}${UNDERLINE}%s${COLOR_NORMAL}\n\n" \
+    "${MY_NAME}${MY_VERSION:+ v${MY_VERSION}}"
 
   echo "Environment variables:"
   for v in \
