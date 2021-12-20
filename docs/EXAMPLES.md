@@ -168,6 +168,12 @@ $ CACHE_VALID="-" ./control_vm_esxi.sh show -n vm-example10
 ./control_vm_esxi.sh update local_iso_path -ff esxi2
 ```
 
+Отложенное обновление (применится после перезагрузки виртуальной машины) адреса DNS-cерверов для
+виртуальной машины `vm-example10`:
+```bash
+./control_vm_esxi.sh update vm_dns_servers vm-example10
+```
+
 Предварительная загрузка необходимых `ISO`-образов на все гипервизоры:
 ```bash
 ./control_vm_esxi.sh upload all

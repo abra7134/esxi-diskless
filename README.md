@@ -2,7 +2,7 @@
 
 Коллекция `BASH`-скриптов для работы с `diskless`-нодами под управлением `VmWare ESXi` гипервизоров.
 
-![](screenshot.png)
+![](docs/screenshots/control_vm_esxi-main.png)
 
 ### Содержание
 
