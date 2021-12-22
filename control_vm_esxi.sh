@@ -4340,8 +4340,10 @@ function command_update {
       run_on_hypervisor \
         "${esxi_id}" \
         "ssh" \
-        "sed -i '/^${update_param_mapped//./\\.}\s\+=/d;\$a \\${update_param_mapped} = \\\"${params[${update_param}]}\\\"' \"${vm_esxi_vmx_filepath}\"" \
-        "|| Unable to update the '${vm_esxi_vmx_filepath}' VMX-file (sed)" \
+        "sed -i '/^${update_param_mapped//./\\.}\s\+=/d' \"${vm_esxi_vmx_filepath}\"" \
+        "|| Unable to remove the old value of parameter from the '${vm_esxi_vmx_filepath}' VMX-file (sed)" \
+        "echo \"${update_param_mapped} = \\\"${params[${update_param}]}\\\"\" >> \"${vm_esxi_vmx_filepath}\""  \
+        "|| Unable to update the '${vm_esxi_vmx_filepath}' VMX-file" \
       || continue
     fi
 
