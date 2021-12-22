@@ -861,8 +861,8 @@ function get_real_vm_list {
     real_vm_id="" \
     vm_esxi_datastore="" \
     vm_esxi_id="" \
+    vm_esxi_vmx_filepath="" \
     vm_name="" \
-    vm_vmx_filepath="" \
     vms_map_str="" \
     vms_map_filepath="" \
     vmx_filepath="" \
@@ -1036,6 +1036,7 @@ function get_real_vm_list {
         vm_esxi_id="${BASH_REMATCH[1]}"
         vm_name="${BASH_REMATCH[2]}"
         vm_esxi_datastore="${BASH_REMATCH[3]}"
+        vm_esxi_vmx_filepath="${BASH_REMATCH[4]}"
 
         let my_params_last_id+=1
         real_vm_id="${my_params_last_id}"
@@ -1043,11 +1044,12 @@ function get_real_vm_list {
         my_params[${real_vm_id}.vm_esxi_id]="${vm_esxi_id}"
         my_params[${real_vm_id}.at]="${esxi_id}"
         my_params[${real_vm_id}.vm_esxi_datastore]="${vm_esxi_datastore}"
+        my_params[${real_vm_id}.vm_esxi_vmx_filepath]="${vm_esxi_vmx_filepath}"
         my_params[${real_vm_id}.special.vm_autostart]="no"
 
         if [ "${get_type}" = "full" ]
         then
-          vm_vmx_filepath="/vmfs/volumes/${BASH_REMATCH[3]}/${BASH_REMATCH[4]}"
+          vm_esxi_vmx_filepath="/vmfs/volumes/${vm_esxi_datastore}/${vm_esxi_vmx_filepath}"
           vmx_filepath=$(
             get_cachefile_path_for \
               "${real_vm_id}"
@@ -1058,8 +1060,8 @@ function get_real_vm_list {
               "${vmx_filepath}" \
               "${esxi_id}" \
               "ssh" \
-              "cat \"${vm_vmx_filepath}\"" \
-              "|| Cannot get the VMX file content (cat)"
+              "cat \"${vm_esxi_vmx_filepath}\"" \
+              "|| Cannot get the VMX-file content (cat)"
           then
             skipping \
               "Failed to update '${vmx_filepath}' cachefile"
@@ -4130,6 +4132,7 @@ function command_update {
     esxi_id="" \
     esxi_name="" \
     real_vm_id="" \
+    vm_esxi_vmx_filepath="" \
     vm_id="" \
     vm_name="" \
     vm_real_id="" \
@@ -4315,6 +4318,7 @@ function command_update {
         continue
       fi
     else
+      progress "Update the '${update_param}' parameter (govc vm.change)"
       if ! \
         GOVC_USERNAME="${params[esxi_ssh_username]}" \
         GOVC_PASSWORD="${params[esxi_ssh_password]}" \
@@ -4330,6 +4334,15 @@ function command_update {
           "Unable to update the '${update_param}' parameter"
         continue
       fi
+
+      progress "Update the '${update_param}' in VMX-file (due to the bug presence in early ESXi builds)"
+      vm_esxi_vmx_filepath="/vmfs/volumes/${my_params[${vm_real_id}.special.vm_esxi_datastore]}/${my_params[${vm_real_id}.vm_esxi_vmx_filepath]}"
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "ssh" \
+        "sed -i '/^${update_param_mapped//./\\.}\s\+=/d;\$a \\${update_param_mapped} = \\\"${params[${update_param}]}\\\"' \"${vm_esxi_vmx_filepath}\"" \
+        "|| Unable to update the '${vm_esxi_vmx_filepath}' VMX-file (sed)" \
+      || continue
     fi
 
     echo "    Virtual machine parameter(s) is updated, continue"
