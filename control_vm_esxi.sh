@@ -3946,6 +3946,9 @@ function command_show {
                 config_value="${my_params[${config_vm_id}.${config_param}]}"
                 datastore_attention=""
 
+                [ "${config_param}" = "local_iso_path" ] \
+                && config_value="${config_value##*/}"
+
                 if [ -v my_params[${real_vm_id}.${vmx_param}] ]
                 then
                   real_value="${my_params[${real_vm_id}.${vmx_param}]}"
