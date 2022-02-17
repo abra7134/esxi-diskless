@@ -2196,7 +2196,9 @@ function remove_isos {
         then
           if [ "${my_params[${real_vm_id}.vmx_parameters]}" = "yes" ]
           then
-            if [    "${my_params[${real_vm_id}.special.local_iso_path]}" = "${local_iso_path}" \
+            if [    -v my_params[${real_vm_id}.special.local_iso_path] \
+                 -a -v my_params[${real_vm_id}.special.vm_esxi_datastore] \
+                 -a "${my_params[${real_vm_id}.special.local_iso_path]}" = "${local_iso_path}" \
                  -a "${my_params[${real_vm_id}.special.vm_esxi_datastore]}" = "${vm_esxi_datastore}" ]
             then
               iso_used_by+=(
