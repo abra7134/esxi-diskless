@@ -1079,7 +1079,10 @@ function get_real_vm_list {
                 -u 6 \
                 vmx_str
             do
-              if [[ "${vmx_str}" =~ ^([[:alnum:]_:\.]+)[[:blank:]]+=[[:blank:]]+\"(.*)\"$ ]]
+              if [ -z "${vmx_str}" ]
+              then
+                continue
+              elif [[ "${vmx_str}" =~ ^([[:alnum:]_:\.]+)[[:blank:]]+=[[:blank:]]+\"(.*)\"$ ]]
               then
                 vmx_param_name="${BASH_REMATCH[1],,}"
                 vmx_param_value="${BASH_REMATCH[2]}"
@@ -1125,7 +1128,7 @@ function get_real_vm_list {
               else
                 skipping \
                   "Cannot parse the vmx string obtained from hypervisor" \
-                  "${vmx_str}"
+                  "--> ${vmx_str}"
                 continue 3
               fi
             done \
