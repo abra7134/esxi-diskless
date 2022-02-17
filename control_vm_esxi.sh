@@ -591,8 +591,10 @@ function esxi_vm_simple_command {
       autostart_seq \
       filesystems \
       vms
-  elif [    "${vm_operation}" != "power reboot" \
-         -a "${vm_operation}" != "power reset" ]
+  fi
+
+  if [    "${vm_operation}" != "power reboot" \
+       -a "${vm_operation}" != "power reset" ]
   then
     local \
       attempts=10
