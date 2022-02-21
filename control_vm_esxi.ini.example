@@ -38,6 +38,7 @@
 #esxi_ssh_username="root"
 #local_hook_path=""
 #local_iso_path=""                 # REQUIRED
+#local_vmdk_path=""                # REQUIRED
 #vm_autostart="no"
 #vm_dns_servers="8.8.8.8 8.8.4.4"  # Separated by spaces
 #vm_esxi_datastore="datastore1"

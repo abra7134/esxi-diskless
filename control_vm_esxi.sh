@@ -64,6 +64,7 @@ declare -A \
     [0.esxi_ssh_username]="root"
     [0.local_hook_path]=""
     [0.local_iso_path]="REQUIRED"
+    [0.local_vmdk_path]="REQUIRED"
     [0.vm_autostart]="no"
     [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
     [0.vm_esxi_datastore]="datastore1"
@@ -137,6 +138,7 @@ declare -A \
     [special.vm_esxi_datastore]="vm_esxi_datastore"
     [special.vm_mac_address]="vm_mac_address"
     [special.local_iso_path]="local_iso_path"
+    [special.local_vmdk_path]="local_vmdk_path"
   )
 
 declare \
@@ -238,7 +240,8 @@ function append_my_ids {
 # with fill ${my_params[@]} parameters of images
 #
 #  Input: ${1}                       - The image identifier will be added in corresponding arrays
-#         ${2}                       - Predefined status of image will be added as 'status' parameter
+#         ${2}                       - The image type ('iso' or 'vmdk' value supported)
+#         ${3}                       - Predefined status of image will be added as 'status' parameter
 #         ${params[@]}               - The array with parameters
 # Modify: ${my_image_ids[@]}         - GLOBAL (see description at top)
 #         ${my_image_ids_ordered[@]} - GLOBAL (see description at top)
@@ -249,20 +252,35 @@ function append_my_image_ids {
   local \
     esxi_image_path="" \
     image_id="${1}" \
-    image_status="${2}" \
+    image_status="${3}" \
+    image_type="${2}" \
     local_image_path="" \
     vm_esxi_datastore=""
 
-  if [ "${params[vmx_parameters]}" = "yes" ]
+  if [    "${params[vmx_parameters]}" = "yes" \
+       -a -v params[special.vm_esxi_datastore] \
+       -a -v params[special.local_${image_type}_path] ]
   then
-    local_image_path="${params[special.local_iso_path]}"
+    local_image_path="${params[special.local_${image_type}_path]}"
     vm_esxi_datastore="${params[special.vm_esxi_datastore]}"
   else
-    local_image_path="${params[local_iso_path]}"
+    local_image_path="${params[local_${image_type}_path]}"
     vm_esxi_datastore="${params[vm_esxi_datastore]}"
   fi
 
-  esxi_image_path="/vmfs/volumes/${vm_esxi_datastore}/.iso/${local_image_path##*/}"
+  case "${image_type}"
+  in
+    "iso" )
+      esxi_image_path="/vmfs/volumes/${vm_esxi_datastore}/.iso/${local_image_path##*/}"
+      ;;
+    "vmdk" )
+      esxi_image_path="/vmfs/volumes/${vm_esxi_datastore}/.templates/${local_image_path##*/}"
+      ;;
+    * )
+      internal \
+        "The bad '${image_type}' value of \$image_type (only 'iso' and 'vmdk' is supported)"
+      ;;
+  esac
 
   my_image_ids[${image_id}]=""
   my_image_ids_ordered+=("${image_id}")
@@ -272,6 +290,7 @@ function append_my_image_ids {
   my_params[${image_id}.esxi_image_path]="${esxi_image_path}"
   my_params[${image_id}.local_image_path]="${local_image_path}"
   my_params[${image_id}.status]="${image_status}"
+  my_params[${image_id}.type]="${image_type}"
 
   return 0
 }
@@ -342,11 +361,20 @@ function check_vm_params {
         return 1
       fi
       ;;&
-    all | local_iso_path )
+    local_iso_path )
       if [ ! -f "${params[local_iso_path]}" ]
       then
         skipping \
-          "The specified ISO-file path '${params[local_iso_path]}' is not exists" \
+          "The specified image path '${params[local_iso_path]}' is not exists" \
+          "Please check it, correct and try again"
+        return 1
+      fi
+      ;;&
+    local_vmdk_path )
+      if [ ! -f "${params[local_vmdk_path]}" ]
+      then
+        skipping \
+          "The specified image path '${params[local_vmdk_path]}' is not exists" \
           "Please check it, correct and try again"
         return 1
       fi
@@ -692,7 +720,8 @@ function get_cachefile_path_for {
 
 # Function to getting ${image_id} and? verify status of the corresponding image
 #
-#  Input: ${1}               - Verify or not the status of the corresponding image
+#  Input: ${1}               - The type of image: 'iso' or 'vmdk' now
+#         ${2}               - Verify or not the status of the corresponding image
 #                              Possible values: without_check, no, or anything
 #         ${my_image_ids[@]} - GLOBAL (see description at top)
 #         ${params[@]}       - The array with parameters
@@ -702,14 +731,24 @@ function get_cachefile_path_for {
 #                              or there is problem with upload/checking image
 function get_image_id {
   local \
-    check_type="${1}" \
-    hash_source=""
+    image_type="${1}" \
+    check_type="${2}"
 
-  if [ "${params[vmx_parameters]}" = "yes" ]
+  if [[ ! "${image_type}" =~ ^iso|vmdk$ ]]
   then
-    hash_source="${params[at]}-${params[special.vm_esxi_datastore]}-${params[special.local_iso_path]}"
+    internal \
+      "The bad '${image_type}' value of \$image_type (only 'iso' and 'vmdk' is supported)"
+  fi
+
+  local \
+    hash_source=""
+  if [    "${params[vmx_parameters]}" = "yes" \
+       -a -v params[special.vm_esxi_datastore] \
+       -a -v params[special.local_${image_type}_path] ]
+  then
+    hash_source="${params[at]}-${params[special.vm_esxi_datastore]}-${params[special.local_${image_type}_path]}"
   else
-    hash_source="${params[at]}-${params[vm_esxi_datastore]}-${params[local_iso_path]##*/}"
+    hash_source="${params[at]}-${params[vm_esxi_datastore]}-${params[local_${image_type}_path]##*/}"
   fi
 
   if ! \
@@ -1015,8 +1054,8 @@ function get_real_vm_list {
         "${vms_map_filepath}" \
         "${esxi_id}" \
         "ssh" \
-        "type -f awk cat grep mkdir sed vim-cmd vsish >/dev/null" \
-        "|| Don't find one of required commands on hypervisor: awk, cat, grep, mkdir, sed, vim-cmd or vsish" \
+        "type -f awk cat grep mkdir sed tar vim-cmd vmkfstools vsish >/dev/null" \
+        "|| Don't find one of required commands on hypervisor: awk, cat, grep, mkdir, sed, tar, vim-cmd, vmkfstools or vsish" \
         "vim-cmd vmsvc/getallvms" \
         "|| Cannot get list of virtual machines on hypervisor (vim-cmd vmsvc/getallvms)"
     then
@@ -1110,7 +1149,10 @@ function get_real_vm_list {
                        -a "${my_params[${real_vm_id}.special.vm_mac_address]}" != "auto" ]
                 then
                   my_params[${real_vm_id}.special.vm_mac_address]="${vmx_param_value^^}"
-                elif [ "${vmx_param_name}" = "ide0:0.filename" ]
+                elif [    "${vmx_param_name}" = "guestinfo.disk_template" ]
+                then
+                  my_params[${real_vm_id}.special.local_vmdk_path]="${vmx_param_value##*/}"
+                elif [    "${vmx_param_name}" = "ide0:0.filename" ]
                 then
                   # This value occurs when specified a host-based CD-ROM
                   if [    "${vmx_param_value}" = "emptyBackingString" \
@@ -1321,7 +1363,7 @@ function parse_ini_file {
         || \
           error="it must be a number from 0 to 65535"
         ;;
-      "local_iso_path" )
+      "local_iso_path"|"local_vmdk_path" )
         [[ "${value}" =~ ^[[:alnum:]_/\.\-]+$ ]] \
         || \
           error="it must consist of characters (in regex notation): [[:alnum:]_.-/]"
@@ -2139,6 +2181,7 @@ function remove_cachefile_for {
 
 # Function to remove no longer needed images from hypervisors after virtual machines destroyed
 #
+#  Input: ${1}                       - Remove image only this type (supported values: 'any', 'iso', 'vmdk')
 # Modify: ${my_image_ids[@]}         - GLOBAL (see description at top)
 #         ${my_image_ids_ordered[@]} - GLOBAL (see description at top)
 #         ${my_options[@]}           - GLOBAL (see description at top)
@@ -2147,6 +2190,15 @@ function remove_cachefile_for {
 # Return: 0                          - Operation is complete
 #
 function remove_images {
+  local \
+    remove_type="${1:-any}"
+
+  if [[ ! "${remove_type}" =~ ^any|iso|vmdk$ ]]
+  then
+    internal \
+      "The bad value '${remove_type}' of \$remove_type (only 'any', 'iso', 'vmdk' is supported)"
+  fi
+
   [ "${my_options[-sr]}" = "yes" ] \
   && return 0
 
@@ -2154,6 +2206,7 @@ function remove_images {
     params=()
   local \
     image_id="" \
+    image_type="" \
     real_vm_id=""
   local \
     skipping_type="image"
@@ -2167,16 +2220,27 @@ function remove_images {
     if [    "${params[status]}" = "destroyed" \
          -o "${params[status]}" = "image updated" ]
     then
-      get_image_id \
-        without_check \
-      || return 1
+      for image_type in \
+        iso \
+        vmdk
+      do
+        if [    "${remove_type}" = "any" \
+             -o "${remove_type}" = "${image_type}" ]
+        then
+          get_image_id \
+            "${image_type}" \
+            without_check \
+          || return 1
 
-      if [ ! -v my_image_ids[${image_id}] ]
-      then
-        append_my_image_ids \
-          "${image_id}" \
-          "to remove"
-      fi
+          if [ ! -v my_image_ids[${image_id}] ]
+          then
+            append_my_image_ids \
+              "${image_id}" \
+              "${image_type}" \
+              "to remove"
+          fi
+        fi
+      done
     fi
   done
 
@@ -2193,6 +2257,8 @@ function remove_images {
     if [ "${my_params[${image_id}.status]}" = "to remove" ]
     then
       esxi_id="${my_params[${image_id}.esxi_id]}"
+      image_type="${my_params[${image_id}.type]}"
+      image_used_by=()
       local_image_path="${my_params[${image_id}.local_image_path]}"
       vm_esxi_datastore="${my_params[${image_id}.esxi_datastore]}"
 
@@ -2206,9 +2272,9 @@ function remove_images {
         then
           if [ "${my_params[${real_vm_id}.vmx_parameters]}" = "yes" ]
           then
-            if [    -v my_params[${real_vm_id}.special.local_iso_path] \
+            if [    -v my_params[${real_vm_id}.special.local_${image_type}_path] \
                  -a -v my_params[${real_vm_id}.special.vm_esxi_datastore] \
-                 -a "${my_params[${real_vm_id}.special.local_iso_path]}" = "${local_image_path}" \
+                 -a "${my_params[${real_vm_id}.special.local_${image_type}_path]}" = "${local_image_path}" \
                  -a "${my_params[${real_vm_id}.special.vm_esxi_datastore]}" = "${vm_esxi_datastore}" ]
             then
               image_used_by+=(
@@ -2683,7 +2749,8 @@ function skipping {
 
 # Function to upload images to hypervisors
 #
-#  Input: ${my_config_esxi_list[@]}   - GLOBAL (see description at top)
+#  Input: ${1}                        - Upload image only this type (supported values: 'any', 'iso', 'vmdk')
+#         ${my_config_esxi_list[@]}   - GLOBAL (see description at top)
 #         ${my_vm_ids_ordered[@]}     - GLOBAL (see description at top)
 # Modify: ${my_esxi_ids[@]}           - GLOBAL (see description at top)
 #         ${my_image_ids[@]}          - GLOBAL (see description at top)
@@ -2692,10 +2759,20 @@ function skipping {
 # Return: 0                           - Always
 #
 function upload_images {
+  local \
+    upload_type="${1:-any}"
+
+  if [[ ! "${upload_type}" =~ ^any|iso|vmdk$ ]]
+  then
+    internal \
+      "The bad value '${upload_type}' of \$upload_type (only 'any', 'iso', 'vmdk' is supported)"
+  fi
+
   local -A \
     params=()
   local \
     image_id="" \
+    image_type="" \
     temp_vm_id="" # Use another name for correct print 'ABORTED' statuses of virtual machines
   local \
     skipping_type="image"
@@ -2704,27 +2781,39 @@ function upload_images {
   do
     get_params "${temp_vm_id}"
 
-    get_image_id \
-      without_check \
-    || continue
-
-    if [ ! -v my_image_ids[${image_id}] ]
-    then
-      append_my_image_ids "${image_id}"
-
-      # 'vm_name' used only for warning if duplicated image definition finded (see above)
-      my_params[${image_id}.vm_name]="${my_config_vm_list[${temp_vm_id}]}"
-    else
-      if [ "${my_params[${image_id}.local_image_path]}" != "${params[local_iso_path]}" ]
+    for image_type in \
+      iso \
+      vmdk
+    do
+      if [    "${upload_type}" = "any" \
+           -o "${upload_type}" = "${image_type}" ]
       then
-        warning \
-          "The duplicated image definition (having the same name but in different locations) finded:" \
-          "1. '${params[local_iso_path]}' image defined for '${my_config_vm_list[${temp_vm_id}]}' virtual machine" \
-          "2. '${my_params[${image_id}.local_image_path]}' image defined for '${my_params[${image_id}.vm_name]}' virtual machine" \
-          "" \
-          "Please check the configuration, an image with a unique name must be in only one instance"
+        get_image_id \
+          "${image_type}" \
+          without_check \
+        || continue
+
+        if [ ! -v my_image_ids[${image_id}] ]
+        then
+          append_my_image_ids \
+            "${image_id}" \
+            "${image_type}"
+
+          # 'vm_name' used only for warning if duplicated image definition finded (see above)
+          my_params[${image_id}.vm_name]="${my_config_vm_list[${temp_vm_id}]}"
+        else
+          if [ "${my_params[${image_id}.local_image_path]}" != "${params[local_${image_type}_path]}" ]
+          then
+            warning \
+              "The duplicated image definition (having the same name but in different locations) finded:" \
+              "1. '${params[local_${image_type}_path]}' image defined for '${my_config_vm_list[${temp_vm_id}]}' virtual machine" \
+              "2. '${my_params[${image_id}.local_image_path]}' image defined for '${my_params[${image_id}.vm_name]}' virtual machine" \
+              "" \
+              "Please check the configuration, an image with a unique name must be in only one instance"
+          fi
+        fi
       fi
-    fi
+    done
   done
 
   local \
@@ -2972,7 +3061,8 @@ function command_create {
     full \
     "${@}"
 
-  upload_images
+  upload_images \
+    any
 
   local -A \
     another_esxi_names=() \
@@ -2996,6 +3086,9 @@ function command_create {
     temp_file="" \
     vm_esxi_dir="" \
     vm_esxi_id="" \
+    vm_esxi_iso_filepath="" \
+    vm_esxi_vmdk_filepath="" \
+    vm_esxi_vmdk_template_filepath="" \
     vm_id="" \
     vm_id_filepath="" \
     vm_name="" \
@@ -3144,7 +3237,14 @@ function command_create {
     fi
 
     get_image_id \
+      iso \
     || continue
+    vm_esxi_iso_filepath="${my_params[${image_id}.esxi_image_path]}"
+
+    get_image_id \
+      vmdk \
+    || continue
+    vm_esxi_vmdk_template_filepath="${my_params[${image_id}.esxi_image_path]}"
 
     vm_recreated=""
     if [ -n "${vm_real_id}" \
@@ -3186,6 +3286,42 @@ function command_create {
       continue
     fi
 
+    vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
+    progress "Create a directory for virtual machine on hypervisor (mkdir)"
+    run_on_hypervisor \
+      "${esxi_id}" \
+      "ssh" \
+      "! test -d \"${vm_esxi_dir}\"" \
+      "|| The directory '${vm_esxi_dir}' is already exist on hypervisor" \
+      "|| Please remove it manually and try again" \
+      "mkdir \"${vm_esxi_dir}\"" \
+      "|| Failed to create a directory '${vm_esxi_dir}' on hypervisor" \
+    || continue
+
+    progress "Create the virtual disk by unpacking the template (tar)"
+    run_on_hypervisor \
+      "${esxi_id}" \
+      "ssh" \
+      "tar x -mof \"${vm_esxi_vmdk_template_filepath}\" -C \"${vm_esxi_dir}\"" \
+      "|| Failed to unpack the template (tar)" \
+    || continue
+
+    vm_esxi_vmdk_filepath="${vm_esxi_dir}/${vm_name}.vmdk"
+    progress "Rename and uuid update of virtual disk (vmkfstools)"
+    run_on_hypervisor \
+      "${esxi_id}" \
+      "ssh" \
+      "set -o pipefail" \
+      "template_filepath=\"${vm_esxi_dir}/\$(basename \"${vm_esxi_vmdk_template_filepath%.vmdk.*}\").vmdk\"" \
+      "|| Failed to get the path of unpacked template file (basename)" \
+      "! test -f \"\$ {template_filepath}\"" \
+      "|| Don't found a '\${template_filepath}' template file" \
+      "vmkfstools --renamevirtualdisk \"\${template_filepath}\" \"${vm_esxi_vmdk_filepath}\"" \
+      "|| Failed to rename a virtual disk (vmfstools)" \
+      "vmkfstools -J setuuid \"${vm_esxi_vmdk_filepath}\" >/dev/null" \
+      "|| Failed to update uuid of a virtual disk (vmkfstools)" \
+    || continue
+
     progress "Prepare a virtual machine configuration file .vmx (in ${temp_dir} directory)"
     vmx_params=(
       [.encoding]="UTF-8"
@@ -3200,9 +3336,10 @@ function command_create {
       [extendedconfigfile]="${vm_name}.vmxf"
       [floppy0.present]="FALSE"
       [guestinfo.hostname]="${vm_name}"
+      [guestinfo.disk_template]="${vm_esxi_vmdk_template_filepath}"
       [hpet0.present]="TRUE"
       [ide0:0.deviceType]="cdrom-image"
-      [ide0:0.fileName]="${my_params[${image_id}.esxi_image_path]}"
+      [ide0:0.fileName]="${vm_esxi_iso_filepath}"
       [ide0:0.present]="TRUE"
       [ide0:0.startConnected]="TRUE"
       [mem.hotadd]="TRUE"
@@ -3237,7 +3374,12 @@ function command_create {
       [sched.scsi0:0.shares]="normal"
       [sched.scsi0:0.throughputCap]="off"
       [sched.swap.vmxSwapEnabled]="FALSE"
-      [scsi0.present]="FALSE"
+      [scsi0.present]="TRUE"
+      [scsi0.virtualdev]="pvscsi"
+      [scsi0:0.deviceType]="scsi-hardDisk"
+      [scsi0:0.filename]="${vm_esxi_vmdk_filepath}"
+      [scsi0:0.present]="TRUE"
+      [scsi0:0.redo]=""
       [svga.present]="TRUE"
       [tools.synctime]="FALSE"
       [tools.upgrade.policy]="manual"
@@ -3275,17 +3417,7 @@ function command_create {
       "${vmx_filepath}.notsorted" \
     > "${vmx_filepath}"
 
-    vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
     progress "Upload a virtual machine configuration to '${esxi_name}' hypervisor (scp)"
-    run_on_hypervisor \
-      "${esxi_id}" \
-      "ssh" \
-      "! test -d \"${vm_esxi_dir}\"" \
-      "|| The directory '${vm_esxi_dir}' is already exist on hypervisor" \
-      "|| Please remove it manually and try again" \
-      "mkdir \"${vm_esxi_dir}\"" \
-      "|| Failed to create a directory '${vm_esxi_dir}' on hypervisor" \
-    || continue
     run_on_hypervisor \
       "${esxi_id}" \
       "scp" \
@@ -3471,7 +3603,8 @@ function command_create {
 
   done
 
-  remove_images
+  remove_images \
+    any
 
   show_processed_status \
     "all" \
@@ -3643,7 +3776,8 @@ function command_destroy {
 
   if [ "${command_name}" = "destroy" ]
   then
-    remove_images
+    remove_images \
+      any
   fi
 
   show_processed_status \
@@ -3746,19 +3880,22 @@ function command_ls {
           "$(print_param vm_vcpus ${vm_id})" \
           "$(print_param vm_timezone ${vm_id})"
         printf -- \
-          "    vm_network_name=\"%s\" vm_dns_servers=\"%s\"\n" \
+          "    vm_network_name=\"%s\" vm_mac_address=\"%s\" vm_dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
+          "$(print_param vm_mac_address ${vm_id})" \
           "$(print_param vm_dns_servers ${vm_id})"
-        printf -- \
-          "    vm_mac_address=\"%s\"\n" \
-          "$(print_param vm_mac_address ${vm_id})"
         printf -- \
           "    vm_ipv4_gateway=\"%s\" vm_ipv4_netmask=\"%s\"\n" \
           "$(print_param vm_ipv4_gateway ${vm_id})" \
           "$(print_param vm_ipv4_netmask ${vm_id})"
         printf -- \
-          "    local_iso_path=\"%s\" local_hook_path=\"%s\"\n" \
-          "$(print_param local_iso_path ${vm_id})" \
+          "    local_iso_path=\"%s\"\n" \
+          "$(print_param local_iso_path ${vm_id})"
+        printf -- \
+          "    local_vmdk_path=\"%s\"\n" \
+          "$(print_param local_vmdk_path ${vm_id})"
+        printf -- \
+          "    local_hook_path=\"%s\"\n" \
           "$(print_param local_hook_path ${vm_id})"
       fi
     done
@@ -3965,7 +4102,8 @@ function command_show {
                 config_value="${my_params[${config_vm_id}.${config_param}]}"
                 datastore_attention=""
 
-                [ "${config_param}" = "local_iso_path" ] \
+                [    "${config_param}" = "local_iso_path" \
+                  -o "${config_param}" = "local_vmdk_path" ] \
                 && config_value="${config_value##*/}"
 
                 if [ -v my_params[${real_vm_id}.${vmx_param}] ]
@@ -4118,8 +4256,11 @@ function command_update {
     full \
     "${@}"
 
-  [ "${update_param}" = "local_iso_path" ] \
-  && upload_images
+  if [ "${update_param}" = "local_iso_path" ]
+  then
+    upload_images \
+      iso
+  fi
 
   local \
     param_name="" \
@@ -4240,6 +4381,7 @@ function command_update {
       fi
 
       get_image_id \
+        iso \
       || continue
 
       progress "Getting the identifier of virtual CD-ROM (govc device.ls cdrom-*)"
@@ -4375,8 +4517,11 @@ function command_update {
     let updated_vms+=1
   done
 
-  [ "${update_param}" = "local_iso_path" ] \
-  && remove_images
+  if [ "${update_param}" = "local_iso_path" ]
+  then
+    remove_images \
+      iso
+  fi
 
   show_processed_status \
     "all" \
@@ -4411,7 +4556,8 @@ function command_upload {
     simple \
     "${@}"
 
-  upload_images
+  upload_images \
+    any
 
   local \
     image_id="" \
