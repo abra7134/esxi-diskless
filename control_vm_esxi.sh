@@ -336,7 +336,7 @@ function check_vm_params {
       if [ ! -f "${params[local_iso_path]}" ]
       then
         skipping \
-          "The specified ISO-file path '${params[local_iso_path]}' is not exists" \
+          "The specified ISO-file path '${params[local_iso_path]}' not exists" \
           "Please check it, correct and try again"
         return 1
       fi
@@ -344,17 +344,26 @@ function check_vm_params {
     all | local_hook_path )
       if [ -n "${params[local_hook_path]}" ]
       then
-        if [ ! -f "${params[local_hook_path]}" ]
+        if [ ! -e "${params[local_hook_path]}" ]
         then
           skipping \
-            "The specified hook-file path '${params[local_hook_path]}' is not exists" \
+            "The specified hook path '${params[local_hook_path]}' not exists" \
             "Please check it, correct and try again"
           return 1
-        elif [ ! -x "${params[local_hook_path]}" ]
+        elif [ -f "${params[local_hook_path]}" ]
+        then
+          if [ ! -x "${params[local_hook_path]}" ]
+          then
+            skipping \
+              "The specified hook-file path '${params[local_hook_path]}' is not executable" \
+              "Please set right permissions (+x) and try again"
+            return 1
+          fi
+        elif [ ! -d "${params[local_hook_path]}" ]
         then
           skipping \
-            "The specified hook-file path '${params[local_hook_path]}' is not executable" \
-            "Please set right permissions (+x) and try again"
+            "The specified hook path '${params[local_hook_path]}' exists, but not a directory or regular file" \
+            "Please check it, correct and try again"
           return 1
         fi
       fi
@@ -1310,11 +1319,17 @@ function parse_ini_file {
         [[ "${value}" =~ ^[[:alnum:]_/\.\-]+$ ]] \
         || \
           error="it must consist of characters (in regex notation): [[:alnum:]_.-/]"
+        [[ "${value}" =~ "//" ]] \
+        && \
+          error="it's not allowed to use consecutive slashes (//)"
         ;;
       "local_hook_path" )
         [[ "${value}" =~ ^([[:alnum:]_/\.\-]+)?$ ]] \
         || \
           error="it must be empty or consist of characters (in regex notation): [[:alnum:]_.-/]"
+        [[ "${value}" =~ "//" ]] \
+        && \
+          error="it's not allowed to use consecutive slashes (//)"
         ;;
       "vm_autostart" )
         [[ "${value}" =~ ^yes|no$ ]] \
@@ -2238,7 +2253,7 @@ function remove_isos {
 # Function to run hook script
 #
 #  Input: ${1}         - The hook type (create, destroy, reboot)
-#         ${2}         - The hook path (must be executable)
+#         ${2}         - The hook path (must be executable regular file or directory)
 #         ${3}         - The name of virtual machine for which the hook is called
 #         ${4}         - The hypervisor name on which the virtual machine is serviced
 #         ${params[@]} - The associative array with virtual machine and hypervisor parameters
@@ -2252,8 +2267,9 @@ function run_hook {
     hook_path="${2}" \
     vm_name="${3}" \
     esxi_name="${4}"
-
-  progress "Run the hook script '${hook_path} ${hook_type} ${vm_name}'"
+  local \
+    hooks_list="" \
+    hooks_status=0
 
   export \
     ESXI_NAME="${esxi_name}" \
@@ -2265,10 +2281,28 @@ function run_hook {
     VM_SSH_USERNAME="${params[vm_ssh_username]}" \
     VM_NAME="${vm_name}"
 
-  "${hook_path}" \
-    "${hook_type}" \
-    "${vm_name}" \
+  progress "Get the list of hooks executables (ls)"
+  hooks_list=$(
+    ls -1 \
+    "${hook_path}"
+  ) \
   || return 1
+
+  while \
+    read f
+  do
+    [ -d "${hook_path}" ] \
+    && f="${hook_path%/}/${f}"
+
+    if [ -x "${f}" ]
+    then
+      progress "Run the hook script '${f}' (TYPE='${TYPE}')"
+      "${f}" \
+      || \
+        let hooks_status=1
+    fi
+  done \
+  <<<"${hooks_list}"
 
   export -n \
     ESXI_NAME \
@@ -2280,7 +2314,7 @@ function run_hook {
     VM_SSH_USERNAME \
     VM_NAME
 
-  return 0
+  return "${hooks_status}"
 }
 
 # Function to run remote command on hypervisor through SSH-connection
