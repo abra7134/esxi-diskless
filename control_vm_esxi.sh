@@ -1931,6 +1931,8 @@ function parse_cmd_real_list {
             vm_real_id="${real_vm_id}"
             append_my_ids \
               "${real_vm_id}"
+            # Added for correct processing hooks
+            my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
           fi
         done
 
