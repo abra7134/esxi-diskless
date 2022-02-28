@@ -69,6 +69,8 @@ declare -A \
     [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
     [0.vm_esxi_datastore]="datastore1"
     [0.vm_guest_type]="debian8-64"
+    [0.vm_hdd_devtype]="pvscsi"
+    [0.vm_hdd_gb]="5"
     [0.vm_ipv4_address]="REQUIRED"
     [0.vm_ipv4_netmask]="255.255.255.0"
     [0.vm_ipv4_gateway]="REQUIRED"
@@ -134,8 +136,10 @@ declare -A \
     [guestos]="vm_guest_type"
     [memsize]="vm_memory_mb"
     [numvcpus]="vm_vcpus"
+    [scsi0.virtualdev]="vm_hdd_devtype"
     [special.vm_autostart]="vm_autostart"
     [special.vm_esxi_datastore]="vm_esxi_datastore"
+    [special.vm_hdd_gb]="vm_hdd_gb"
     [special.vm_mac_address]="vm_mac_address"
     [special.local_iso_path]="local_iso_path"
     [special.local_vmdk_path]="local_vmdk_path"
@@ -1111,8 +1115,14 @@ function get_real_vm_list {
               "${vmx_filepath}" \
               "${esxi_id}" \
               "ssh" \
-              "cat \"${vm_esxi_vmx_filepath}\"" \
-              "|| Cannot get the VMX-file content (cat)"
+              "cd \"${vm_esxi_vmx_filepath%/*}\"" \
+              "|| Failed to enter to virtual machine directory (cd)" \
+              "cat \"${vm_esxi_vmx_filepath##*/}\"" \
+              "|| Cannot get the VMX-file content (cat)" \
+              "vmdk_filepath=\$(sed -n '/^scsi0:0.filename \?= \?\"\(.*\)\"$/s//\1/p' \"${vm_esxi_vmx_filepath##*/}\")" \
+              "|| Cannot to get the vmdk filepath (sed)" \
+              "if test -f \"\${vmdk_filepath}\"; then awk 'BEGIN { blocks=0; } \$1 == \"RW\" && \$3 == \"VMFS\" { blocks+=\$2; } END { print \"scsi0:0.size_kb = \\\"\" blocks/2 \"\\\"\"; }' \"\${vmdk_filepath}\"; fi" \
+              "|| Cannot to calculate the HDD-size of virual machine (awk)"
           then
             skipping \
               "Failed to update '${vmx_filepath}' cachefile"
@@ -1152,6 +1162,9 @@ function get_real_vm_list {
                 elif [    "${vmx_param_name}" = "guestinfo.disk_template" ]
                 then
                   my_params[${real_vm_id}.special.local_vmdk_path]="${vmx_param_value##*/}"
+                elif [    "${vmx_param_name}" = "scsi0:0.size_kb" ]
+                then
+                  my_params[${real_vm_id}.special.vm_hdd_gb]="$((vmx_param_value/1024/1024))"
                 elif [    "${vmx_param_name}" = "ide0:0.filename" ]
                 then
                   # This value occurs when specified a host-based CD-ROM
@@ -1382,6 +1395,17 @@ function parse_ini_file {
         [[ "${value// /.}." =~ ^(((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4})+$ ]] \
         || \
           error="it must be the correct list of IPv4 address (in x.x.x.x format) delimeted by spaces"
+        ;;
+      "vm_hdd_devtype" )
+        [[ "${value}" =~ ^pvscsi|lsasas1068|lsilogic$ ]] \
+        || \
+          error="it must be 'pvscsi', 'lsisas1068' or 'lsilogic' value"
+        ;;
+      "vm_hdd_gb" )
+        [[    "${value}" =~ ^[[:digit:]]+$
+           && "${value}" -gt 0 ]] \
+        || \
+          error="it must be a number and greater than 0"
         ;;
       "vm_ipv4_address"|"vm_ipv4_gateway" )
         [[ "${value}." =~ ^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.){4}$ ]] \
@@ -3078,6 +3102,8 @@ function command_create {
     autostart_param="" \
     esxi_free_memory_kb="" \
     esxi_free_memory_filepath="" \
+    esxi_free_storage_kb="" \
+    esxi_free_storage_filepath="" \
     esxi_id="" \
     esxi_name="" \
     image_id="" \
@@ -3099,6 +3125,7 @@ function command_create {
 
   vm_id_filepath="${temp_dir}/vm_id"
   esxi_free_memory_filepath="${temp_dir}/esxi_free_memory"
+  esxi_free_storage_filepath="${temp_dir}/esxi_free_storage"
 
   for vm_id in "${my_vm_ids_ordered[@]}"
   do
@@ -3322,6 +3349,49 @@ function command_create {
       "|| Failed to update uuid of a virtual disk (vmkfstools)" \
     || continue
 
+    progress "Check the amount of free storage space on the hypervisor (df)"
+    run_on_hypervisor \
+    >"${esxi_free_storage_filepath}" \
+      "${esxi_id}" \
+      "ssh" \
+      "set -o pipefail" \
+      "df -k | awk '\$6 == \"/vmfs/volumes/${params[vm_esxi_datastore]}\" {print \$4;}'" \
+      "|| Failed to get the free storage space on hypervisor (df)" \
+    || continue
+
+    if ! \
+      read -r \
+        esxi_free_storage_kb \
+      <"${esxi_free_storage_filepath}"
+    then
+      skipping \
+        "Failed to get hypervisor's free storage space from '${esxi_free_storage_filepath}' file"
+      continue
+    elif [ -z "${esxi_free_storage_kb}" ]
+    then
+      skipping \
+        "Unable to get hypervisor's free storage space (empty value)"
+      continue
+    elif [ $((esxi_free_storage_kb/1024/1024)) -lt $((params[vm_hdd_gb])) ]
+    then
+      skipping \
+        "Not enough free storage space on the hypervisor (need ${params[vm_hdd_gb]}Gb, but free only $((esxi_free_storage_kb/1024/1024))Gb)"
+      continue
+    fi
+
+    progress "Extend the HDD to specified size (vmkfstools)"
+    run_on_hypervisor \
+      "${esxi_id}" \
+      "ssh" \
+      "set -o pipefail" \
+      "template_size_kb=\$(awk 'BEGIN { blocks=0; } \$1 == \"RW\" && \$3 == \"VMFS\" { blocks+=\$2; } END { print blocks/2; }' \"${vm_esxi_vmdk_filepath}\")" \
+      "|| Failed to calculate the size of template (awk)" \
+      "test ${params[vm_hdd_gb]} -gt \$((template_size_kb/1024/1024))" \
+      "|| Unable to extend the HDD due the specified size is less than size of template" \
+      "vmkfstools --extendvirtualdisk \"${params[vm_hdd_gb]}G\" \"${vm_esxi_vmdk_filepath}\"" \
+      "|| Failed to extend the HDD to specified size (vmkfstools)" \
+    || continue
+
     progress "Prepare a virtual machine configuration file .vmx (in ${temp_dir} directory)"
     vmx_params=(
       [.encoding]="UTF-8"
@@ -3375,9 +3445,8 @@ function command_create {
       [sched.scsi0:0.throughputCap]="off"
       [sched.swap.vmxSwapEnabled]="FALSE"
       [scsi0.present]="TRUE"
-      [scsi0.virtualdev]="pvscsi"
       [scsi0:0.deviceType]="scsi-hardDisk"
-      [scsi0:0.filename]="${vm_esxi_vmdk_filepath}"
+      [scsi0:0.filename]="${vm_esxi_vmdk_filepath##*/}"
       [scsi0:0.present]="TRUE"
       [scsi0:0.redo]=""
       [svga.present]="TRUE"
@@ -3879,6 +3948,10 @@ function command_ls {
           "$(print_param vm_memory_mb ${vm_id})" \
           "$(print_param vm_vcpus ${vm_id})" \
           "$(print_param vm_timezone ${vm_id})"
+        printf -- \
+          "    vm_hdd_gb=\"%s\" vm_hdd_devtype=\"%s\"\n" \
+          "$(print_param vm_hdd_gb ${vm_id})" \
+          "$(print_param vm_hdd_devtype ${vm_id})"
         printf -- \
           "    vm_network_name=\"%s\" vm_mac_address=\"%s\" vm_dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \

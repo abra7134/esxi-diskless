@@ -42,6 +42,8 @@
 #vm_autostart="no"
 #vm_dns_servers="8.8.8.8 8.8.4.4"  # Separated by spaces
 #vm_esxi_datastore="datastore1"
+#vm_hdd_devtype="pvscsi"
+#vm_hdd_gb="5"
 #vm_guest_type="debian8-64"
 #vm_ipv4_address=""                # REQUIRED
 #vm_ipv4_netmask="255.255.255.0"
