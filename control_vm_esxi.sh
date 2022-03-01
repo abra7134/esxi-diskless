@@ -63,8 +63,8 @@ declare -A \
     [0.esxi_ssh_port]="22"
     [0.esxi_ssh_username]="root"
     [0.local_hook_path]=""
-    [0.local_iso_path]="REQUIRED"
-    [0.local_vmdk_path]="REQUIRED"
+    [0.local_iso_path]=""
+    [0.local_vmdk_path]=""
     [0.vm_autostart]="no"
     [0.vm_dns_servers]="8.8.8.8 8.8.4.4"
     [0.vm_esxi_datastore]="datastore1"
@@ -356,52 +356,33 @@ function check_vm_params {
   case "${check_vm_param}"
   in
     # local_image_path is INTERNAL use only
-    local_image_path )
-      if [ ! -f "${params[local_image_path]}" ]
-      then
-        skipping \
-          "The specified image path '${params[local_image_path]}' is not exists" \
-          "Please check it, correct and try again"
-        return 1
-      fi
-      ;;&
-    local_iso_path )
-      if [ ! -f "${params[local_iso_path]}" ]
-      then
-        skipping \
-          "The specified image path '${params[local_iso_path]}' is not exists" \
-          "Please check it, correct and try again"
-        return 1
-      fi
-      ;;&
-    local_vmdk_path )
-      if [ ! -f "${params[local_vmdk_path]}" ]
-      then
-        skipping \
-          "The specified image path '${params[local_vmdk_path]}' is not exists" \
-          "Please check it, correct and try again"
-        return 1
-      fi
-      ;;&
-    all | local_hook_path )
-      if [ -n "${params[local_hook_path]}" ]
-      then
-        if [ ! -f "${params[local_hook_path]}" ]
+    "all"|"local_hook_path"|"local_image_path"|"local_iso_path"|"local_vmdk_path" )
+      local \
+        param="" \
+        param_value=""
+      for param in "${check_vm_param/#all/hook image iso vmdk}"
+      do
+        param_value="${params[local_${param}_path]}"
+        if [ -n "${param_value}" ]
         then
-          skipping \
-            "The specified hook-file path '${params[local_hook_path]}' is not exists" \
-            "Please check it, correct and try again"
-          return 1
-        elif [ ! -x "${params[local_hook_path]}" ]
-        then
-          skipping \
-            "The specified hook-file path '${params[local_hook_path]}' is not executable" \
-            "Please set right permissions (+x) and try again"
-          return 1
+          if [ ! -f "${param_value}" ]
+          then
+            skipping \
+              "The specified ${param}-file path '${param_value}' is not exists" \
+              "Please check it, correct and try again"
+            return 1
+          elif [    "${param}" = "hook" \
+                 -a ! -x "${param_value}" ]
+          then
+            skipping \
+              "The specified ${param}-file path '${param_value}' is not executable" \
+              "Please set right permissions (+x) and try again"
+            return 1
+          fi
         fi
-      fi
+      done
       ;;&
-    all | vm_ipv4_address | vm_ipv4_netmask | vm_ipv4_gateway )
+    "all"|"vm_ipv4_address"|"vm_ipv4_netmask"|"vm_ipv4_gateway" )
       if [ "${params[vm_ipv4_address]}" = "${params[vm_ipv4_gateway]}" ]
       then
         skipping \
@@ -747,12 +728,17 @@ function get_image_id {
   local \
     hash_source=""
   if [    "${params[vmx_parameters]}" = "yes" \
-       -a -v params[special.vm_esxi_datastore] \
-       -a -v params[special.local_${image_type}_path] ]
+       -a -n "${params[special.vm_esxi_datastore]}" \
+       -a -n "${params[special.local_${image_type}_path]}" ]
   then
     hash_source="${params[at]}-${params[special.vm_esxi_datastore]}-${params[special.local_${image_type}_path]}"
-  else
+  elif [    -n "${params[vm_esxi_datastore]}" \
+         -a -n "${params[local_${image_type}_path]}" ]
+  then
     hash_source="${params[at]}-${params[vm_esxi_datastore]}-${params[local_${image_type}_path]##*/}"
+  else
+    image_id=""
+    return 0
   fi
 
   if ! \
@@ -1169,10 +1155,11 @@ function get_real_vm_list {
                 then
                   # This value occurs when specified a host-based CD-ROM
                   if [    "${vmx_param_value}" = "emptyBackingString" \
-                       -o "${vmx_param_value}" = "auto detect" ]
+                       -o "${vmx_param_value}" = "auto detect" \
+                       -o "${vmx_param_value}" = "" ]
                   then
                     :
-                  elif [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)$ ]]
+                  elif [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)?$ ]]
                   then
                     filesystem_name="${BASH_REMATCH[1]}"
                     for filesystem_id in "${!filesystems_uuids[@]}"
@@ -1376,15 +1363,25 @@ function parse_ini_file {
         || \
           error="it must be a number from 0 to 65535"
         ;;
-      "local_iso_path"|"local_vmdk_path" )
-        [[ "${value}" =~ ^[[:alnum:]_/\.\-]+$ ]] \
-        || \
-          error="it must consist of characters (in regex notation): [[:alnum:]_.-/]"
-        ;;
-      "local_hook_path" )
-        [[ "${value}" =~ ^([[:alnum:]_/\.\-]+)?$ ]] \
-        || \
+      "local_hook_path"|"local_iso_path"|"local_vmdk_path" )
+        if [ -z "${value}" ]
+        then
+          :
+        elif [[ "${value}" =~ // ]]
+        then
+          error="double slashes are not allowed"
+        elif [[ ! "${value}" =~ ^[[:alnum:]_/\.\-]+$ ]]
+        then
           error="it must be empty or consist of characters (in regex notation): [[:alnum:]_.-/]"
+        elif [[    "${param}" = "local_iso_path"
+                && ! "${value}" =~ \.iso$ ]]
+        then
+          error="it must have the '.iso' extension"
+        elif [[    "${param}" = "local_vmdk_path"
+                && ! "${value}" =~ \.vmdk\.t(ar\.)?(bz2|gz|lzma|xz|zst)$ ]]
+        then
+          error="it must have the '.vmdk.tar.(bz2|gz|lzma|xz|zst) extension"
+        fi
         ;;
       "vm_autostart" )
         [[ "${value}" =~ ^yes|no$ ]] \
@@ -1447,7 +1444,7 @@ function parse_ini_file {
         ;;
       * )
         [ -z "${value}" \
-          -a "${my_params[0.${param}]}" != "" ] \
+          -a -n "${my_params[0.${param}]}" ] \
         && \
           error="it must be not empty"
         ;;
@@ -2256,6 +2253,9 @@ function remove_images {
             without_check \
           || return 1
 
+          [ -z "${image_id}" ] \
+          && continue
+
           if [ ! -v my_image_ids[${image_id}] ]
           then
             append_my_image_ids \
@@ -2817,6 +2817,9 @@ function upload_images {
           without_check \
         || continue
 
+        [ -z "${image_id}" ] \
+        && continue
+
         if [ ! -v my_image_ids[${image_id}] ]
         then
           append_my_image_ids \
@@ -3325,73 +3328,6 @@ function command_create {
       "|| Failed to create a directory '${vm_esxi_dir}' on hypervisor" \
     || continue
 
-    progress "Create the virtual disk by unpacking the template (tar)"
-    run_on_hypervisor \
-      "${esxi_id}" \
-      "ssh" \
-      "tar x -mof \"${vm_esxi_vmdk_template_filepath}\" -C \"${vm_esxi_dir}\"" \
-      "|| Failed to unpack the template (tar)" \
-    || continue
-
-    vm_esxi_vmdk_filepath="${vm_esxi_dir}/${vm_name}.vmdk"
-    progress "Rename and uuid update of virtual disk (vmkfstools)"
-    run_on_hypervisor \
-      "${esxi_id}" \
-      "ssh" \
-      "set -o pipefail" \
-      "template_filepath=\"${vm_esxi_dir}/\$(basename \"${vm_esxi_vmdk_template_filepath%.vmdk.*}\").vmdk\"" \
-      "|| Failed to get the path of unpacked template file (basename)" \
-      "! test -f \"\$ {template_filepath}\"" \
-      "|| Don't found a '\${template_filepath}' template file" \
-      "vmkfstools --renamevirtualdisk \"\${template_filepath}\" \"${vm_esxi_vmdk_filepath}\"" \
-      "|| Failed to rename a virtual disk (vmfstools)" \
-      "vmkfstools -J setuuid \"${vm_esxi_vmdk_filepath}\" >/dev/null" \
-      "|| Failed to update uuid of a virtual disk (vmkfstools)" \
-    || continue
-
-    progress "Check the amount of free storage space on the hypervisor (df)"
-    run_on_hypervisor \
-    >"${esxi_free_storage_filepath}" \
-      "${esxi_id}" \
-      "ssh" \
-      "set -o pipefail" \
-      "df -k | awk '\$6 == \"/vmfs/volumes/${params[vm_esxi_datastore]}\" {print \$4;}'" \
-      "|| Failed to get the free storage space on hypervisor (df)" \
-    || continue
-
-    if ! \
-      read -r \
-        esxi_free_storage_kb \
-      <"${esxi_free_storage_filepath}"
-    then
-      skipping \
-        "Failed to get hypervisor's free storage space from '${esxi_free_storage_filepath}' file"
-      continue
-    elif [ -z "${esxi_free_storage_kb}" ]
-    then
-      skipping \
-        "Unable to get hypervisor's free storage space (empty value)"
-      continue
-    elif [ $((esxi_free_storage_kb/1024/1024)) -lt $((params[vm_hdd_gb])) ]
-    then
-      skipping \
-        "Not enough free storage space on the hypervisor (need ${params[vm_hdd_gb]}Gb, but free only $((esxi_free_storage_kb/1024/1024))Gb)"
-      continue
-    fi
-
-    progress "Extend the HDD to specified size (vmkfstools)"
-    run_on_hypervisor \
-      "${esxi_id}" \
-      "ssh" \
-      "set -o pipefail" \
-      "template_size_kb=\$(awk 'BEGIN { blocks=0; } \$1 == \"RW\" && \$3 == \"VMFS\" { blocks+=\$2; } END { print blocks/2; }' \"${vm_esxi_vmdk_filepath}\")" \
-      "|| Failed to calculate the size of template (awk)" \
-      "test ${params[vm_hdd_gb]} -gt \$((template_size_kb/1024/1024))" \
-      "|| Unable to extend the HDD due the specified size is less than size of template" \
-      "vmkfstools --extendvirtualdisk \"${params[vm_hdd_gb]}G\" \"${vm_esxi_vmdk_filepath}\"" \
-      "|| Failed to extend the HDD to specified size (vmkfstools)" \
-    || continue
-
     progress "Prepare a virtual machine configuration file .vmx (in ${temp_dir} directory)"
     vmx_params=(
       [.encoding]="UTF-8"
@@ -3406,7 +3342,6 @@ function command_create {
       [extendedconfigfile]="${vm_name}.vmxf"
       [floppy0.present]="FALSE"
       [guestinfo.hostname]="${vm_name}"
-      [guestinfo.disk_template]="${vm_esxi_vmdk_template_filepath}"
       [hpet0.present]="TRUE"
       [ide0:0.deviceType]="cdrom-image"
       [ide0:0.fileName]="${vm_esxi_iso_filepath}"
@@ -3444,11 +3379,7 @@ function command_create {
       [sched.scsi0:0.shares]="normal"
       [sched.scsi0:0.throughputCap]="off"
       [sched.swap.vmxSwapEnabled]="FALSE"
-      [scsi0.present]="TRUE"
-      [scsi0:0.deviceType]="scsi-hardDisk"
-      [scsi0:0.filename]="${vm_esxi_vmdk_filepath##*/}"
-      [scsi0:0.present]="TRUE"
-      [scsi0:0.redo]=""
+      [scsi0.present]="FALSE"
       [svga.present]="TRUE"
       [tools.synctime]="FALSE"
       [tools.upgrade.policy]="manual"
@@ -3473,6 +3404,84 @@ function command_create {
     else
       vmx_params[ethernet0.address]="${params[vm_mac_address]}"
       vmx_params[ethernet0.addresstype]="static"
+    fi
+
+    if [ -n "${vm_esxi_vmdk_template_filepath}" ]
+    then
+      vm_esxi_vmdk_filepath="${vm_esxi_dir}/${vm_name}.vmdk"
+
+      vmx_params[guestinfo.disk_template]="${vm_esxi_vmdk_template_filepath}"
+      vmx_params[scsi0.present]="TRUE"
+      vmx_params[scsi0:0.deviceType]="scsi-hardDisk"
+      vmx_params[scsi0:0.filename]="${vm_esxi_vmdk_filepath##*/}"
+      vmx_params[scsi0:0.present]="TRUE"
+      vmx_params[scsi0:0.redo]=""
+
+      progress "Create the virtual disk by unpacking the template (tar)"
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "ssh" \
+        "tar x -mof \"${vm_esxi_vmdk_template_filepath}\" -C \"${vm_esxi_dir}\"" \
+        "|| Failed to unpack the template (tar)" \
+      || continue
+
+      progress "Rename and uuid update of virtual disk (vmkfstools)"
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "ssh" \
+        "set -o pipefail" \
+        "template_filepath=\"${vm_esxi_dir}/\$(basename \"${vm_esxi_vmdk_template_filepath%.vmdk.*}\").vmdk\"" \
+        "|| Failed to get the path of unpacked template file (basename)" \
+        "! test -f \"\$ {template_filepath}\"" \
+        "|| Don't found a '\${template_filepath}' template file" \
+        "vmkfstools --renamevirtualdisk \"\${template_filepath}\" \"${vm_esxi_vmdk_filepath}\"" \
+        "|| Failed to rename a virtual disk (vmfstools)" \
+        "vmkfstools -J setuuid \"${vm_esxi_vmdk_filepath}\" >/dev/null" \
+        "|| Failed to update uuid of a virtual disk (vmkfstools)" \
+      || continue
+
+      progress "Check the amount of free storage space on the hypervisor (df)"
+      run_on_hypervisor \
+      >"${esxi_free_storage_filepath}" \
+        "${esxi_id}" \
+        "ssh" \
+        "set -o pipefail" \
+        "df -k | awk '\$6 == \"/vmfs/volumes/${params[vm_esxi_datastore]}\" {print \$4;}'" \
+        "|| Failed to get the free storage space on hypervisor (df)" \
+      || continue
+
+      if ! \
+        read -r \
+          esxi_free_storage_kb \
+        <"${esxi_free_storage_filepath}"
+      then
+        skipping \
+          "Failed to get hypervisor's free storage space from '${esxi_free_storage_filepath}' file"
+        continue
+      elif [ -z "${esxi_free_storage_kb}" ]
+      then
+        skipping \
+          "Unable to get hypervisor's free storage space (empty value)"
+        continue
+      elif [ $((esxi_free_storage_kb/1024/1024)) -lt $((params[vm_hdd_gb])) ]
+      then
+        skipping \
+          "Not enough free storage space on the hypervisor (need ${params[vm_hdd_gb]}Gb, but free only $((esxi_free_storage_kb/1024/1024))Gb)"
+        continue
+      fi
+
+      progress "Extend the HDD to specified size (vmkfstools)"
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "ssh" \
+        "set -o pipefail" \
+        "template_size_kb=\$(awk 'BEGIN { blocks=0; } \$1 == \"RW\" && \$3 == \"VMFS\" { blocks+=\$2; } END { print blocks/2; }' \"${vm_esxi_vmdk_filepath}\")" \
+        "|| Failed to calculate the size of template (awk)" \
+        "test ${params[vm_hdd_gb]} -gt \$((template_size_kb/1024/1024))" \
+        "|| Unable to extend the HDD due the specified size is less than size of template" \
+        "vmkfstools --extendvirtualdisk \"${params[vm_hdd_gb]}G\" \"${vm_esxi_vmdk_filepath}\"" \
+        "|| Failed to extend the HDD to specified size (vmkfstools)" \
+      || continue
     fi
 
     vmx_filepath="${temp_dir}/${vm_name}.vmx"
@@ -3668,8 +3677,14 @@ function command_create {
       my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (Destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
 
-    my_vm_ids[${vm_id}]+=" (Runned on '${params[local_iso_path]}')"
-
+    if [ -n "${params[local_iso_path]}" \
+         -o -n "${params[local_vmdk_path]}" ]
+    then
+      my_vm_ids[${vm_id}]+=" (Runned "
+      my_vm_ids[${vm_id}]+="${params[local_iso_path]:+on '${params[local_iso_path]}'}"
+      my_vm_ids[${vm_id}]+="${params[local_vmdk_path]:+${params[local_iso_path]:+ and }with HDD from '${params[local_vmdk_path]}'}"
+      my_vm_ids[${vm_id}]+=")"
+    fi
   done
 
   remove_images \
@@ -3948,10 +3963,13 @@ function command_ls {
           "$(print_param vm_memory_mb ${vm_id})" \
           "$(print_param vm_vcpus ${vm_id})" \
           "$(print_param vm_timezone ${vm_id})"
-        printf -- \
-          "    vm_hdd_gb=\"%s\" vm_hdd_devtype=\"%s\"\n" \
-          "$(print_param vm_hdd_gb ${vm_id})" \
-          "$(print_param vm_hdd_devtype ${vm_id})"
+        if [ -n "${my_params[${vm_id}.local_vmdk_path]}" ]
+        then
+          printf -- \
+            "    vm_hdd_gb=\"%s\" vm_hdd_devtype=\"%s\"\n" \
+            "$(print_param vm_hdd_gb ${vm_id})" \
+            "$(print_param vm_hdd_devtype ${vm_id})"
+        fi
         printf -- \
           "    vm_network_name=\"%s\" vm_mac_address=\"%s\" vm_dns_servers=\"%s\"\n" \
           "$(print_param vm_network_name ${vm_id})" \
@@ -4368,6 +4386,7 @@ function command_update {
     vm_name="" \
     vm_real_id="" \
     vm_tools_status="" \
+    update_param_old_value="" \
     updated_vms=0
 
   for vm_id in "${my_vm_ids_ordered[@]}"
@@ -4431,7 +4450,8 @@ function command_update {
       "${update_param}" \
     || continue
 
-    if [ "${params[${update_param}]}" = "${my_params[${vm_real_id}.${update_param_mapped}]}" ]
+    update_param_old_value="${my_params[${vm_real_id}.${update_param_mapped}]:-}"
+    if [ "${params[${update_param}]}" = "${update_param_old_value}" ]
     then
       skipping \
         "No update required, parameter already has the required value"
@@ -4440,17 +4460,20 @@ function command_update {
 
     if [ "${update_param}" = "local_iso_path" ]
     then
-      get_vm_tools_status \
-        "${esxi_id}" \
-        "${my_params[${vm_real_id}.vm_esxi_id]}" \
-      || continue
-
-      if [ "${vm_tools_status}" != "toolsOk" ]
+      if [ -n "${update_param_old_value}" ]
       then
-        skipping \
-          "Update operation requires installed and running 'vmware-tools' on the virtual machine" \
-          "because the 'eject' command is required in the virtual machine environment"
-        continue
+        get_vm_tools_status \
+          "${esxi_id}" \
+          "${my_params[${vm_real_id}.vm_esxi_id]}" \
+        || continue
+
+        if [ "${vm_tools_status}" != "toolsOk" ]
+        then
+          skipping \
+            "Update operation requires installed and running 'vmware-tools' on the virtual machine" \
+            "because the 'eject' command is required in the virtual machine environment"
+          continue
+        fi
       fi
 
       get_image_id \
@@ -4491,27 +4514,30 @@ function command_update {
           "Unable to parse the cdrom identifier '${cdrom_id}', it must be prefixed with 'cdrom-'"
       fi
 
-      progress "Eject the ISO-image from virtual machine's CD-ROM (govc guest.run -l nobody)"
-      if ! \
-        GOVC_USERNAME="${params[esxi_ssh_username]}" \
-        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-        govc \
-          guest.run \
-          -dc=ha-datacenter \
-          -k=true \
-          -l=nobody \
-          -u="https://${params[esxi_hostname]}" \
-          -vm="${vm_name}" \
-          /usr/bin/eject --manualeject off /dev/cdrom \
-          \&\& \
-            if /usr/bin/head -c1 /dev/cdrom \&\>/dev/null\; \
-            then \
-              /usr/bin/eject /dev/cdrom\; \
-            fi
+      if [ -n "${update_param_old_value}" ]
       then
-        skipping \
-          "Unable to eject the ISO-image from virtual machine's CD-ROM"
-        continue
+        progress "Eject the ISO-image from virtual machine's CD-ROM (govc guest.run -l nobody)"
+        if ! \
+          GOVC_USERNAME="${params[esxi_ssh_username]}" \
+          GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+          govc \
+            guest.run \
+            -dc=ha-datacenter \
+            -k=true \
+            -l=nobody \
+            -u="https://${params[esxi_hostname]}" \
+            -vm="${vm_name}" \
+            /usr/bin/eject --manualeject off /dev/cdrom \
+            \&\& \
+              if /usr/bin/head -c1 /dev/cdrom \&\>/dev/null\; \
+              then \
+                /usr/bin/eject /dev/cdrom\; \
+              fi
+        then
+          skipping \
+            "Unable to eject the ISO-image from virtual machine's CD-ROM"
+          continue
+        fi
       fi
 
       progress "Update the '${update_param}' parameter (govc device.cdrom.insert)"
@@ -4526,28 +4552,31 @@ function command_update {
           -k=true \
           -u="https://${params[esxi_hostname]}" \
           -vm="${vm_name}" \
-          ".iso/${params[local_iso_path]##*/}"
+          "${params[local_iso_path]:+.iso/}${params[local_iso_path]##*/}"
       then
         skipping \
           "Unable to update the '${update_param}' parameter"
         continue
       fi
 
-      progress "Connect the ISO-image to CDROM (govc device.connect)"
-      if ! \
-        GOVC_USERNAME="${params[esxi_ssh_username]}" \
-        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-        govc \
-          device.connect \
-          -dc=ha-datacenter \
-          -k=true \
-          -u="https://${params[esxi_hostname]}" \
-          -vm="${vm_name}" \
-          "${cdrom_id}"
+      if [ -n "${image_id}" ]
       then
-        skipping \
-          "Unable to connect the ISO-image to CDROM"
-        continue
+        progress "Connect the ISO-image to CDROM (govc device.connect)"
+        if ! \
+          GOVC_USERNAME="${params[esxi_ssh_username]}" \
+          GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+          govc \
+            device.connect \
+            -dc=ha-datacenter \
+            -k=true \
+            -u="https://${params[esxi_hostname]}" \
+            -vm="${vm_name}" \
+            "${cdrom_id}"
+        then
+          skipping \
+            "Unable to connect the ISO-image to CDROM"
+          continue
+        fi
       fi
     else
       progress "Update the '${update_param}' parameter (govc vm.change)"
