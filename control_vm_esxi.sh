@@ -1107,7 +1107,7 @@ function get_real_vm_list {
               "|| Cannot get the VMX-file content (cat)" \
               "vmdk_filepath=\$(sed -n '/^scsi0:0.filename \?= \?\"\(.*\)\"$/s//\1/p' \"${vm_esxi_vmx_filepath##*/}\")" \
               "|| Cannot to get the vmdk filepath (sed)" \
-              "if test -f \"\${vmdk_filepath}\"; then awk 'BEGIN { blocks=0; } \$1 == \"RW\" && \$3 == \"VMFS\" { blocks+=\$2; } END { print \"scsi0:0.size_kb = \\\"\" blocks/2 \"\\\"\"; }' \"\${vmdk_filepath}\"; fi" \
+              "if test -f \"\${vmdk_filepath}\"; then awk 'BEGIN { blocks=0; } \$1 == \"RW\" { blocks+=\$2; } END { print \"scsi0:0.size_kb = \\\"\" blocks/2 \"\\\"\"; }' \"\${vmdk_filepath}\"; fi" \
               "|| Cannot to calculate the HDD-size of virual machine (awk)"
           then
             skipping \
@@ -1378,9 +1378,9 @@ function parse_ini_file {
         then
           error="it must have the '.iso' extension"
         elif [[    "${param}" = "local_vmdk_path"
-                && ! "${value}" =~ \.vmdk\.t(ar\.)?(bz2|gz|lzma|xz|zst)$ ]]
+                && ! "${value}" =~ \.vmdk$ ]]
         then
-          error="it must have the '.vmdk.tar.(bz2|gz|lzma|xz|zst) extension"
+          error="it must have the '.vmdk' extension"
         fi
         ;;
       "vm_autostart" )
@@ -3417,29 +3417,6 @@ function command_create {
       vmx_params[scsi0:0.present]="TRUE"
       vmx_params[scsi0:0.redo]=""
 
-      progress "Create the virtual disk by unpacking the template (tar)"
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "ssh" \
-        "tar x -mof \"${vm_esxi_vmdk_template_filepath}\" -C \"${vm_esxi_dir}\"" \
-        "|| Failed to unpack the template (tar)" \
-      || continue
-
-      progress "Rename and uuid update of virtual disk (vmkfstools)"
-      run_on_hypervisor \
-        "${esxi_id}" \
-        "ssh" \
-        "set -o pipefail" \
-        "template_filepath=\"${vm_esxi_dir}/\$(basename \"${vm_esxi_vmdk_template_filepath%.vmdk.*}\").vmdk\"" \
-        "|| Failed to get the path of unpacked template file (basename)" \
-        "! test -f \"\$ {template_filepath}\"" \
-        "|| Don't found a '\${template_filepath}' template file" \
-        "vmkfstools --renamevirtualdisk \"\${template_filepath}\" \"${vm_esxi_vmdk_filepath}\"" \
-        "|| Failed to rename a virtual disk (vmfstools)" \
-        "vmkfstools -J setuuid \"${vm_esxi_vmdk_filepath}\" >/dev/null" \
-        "|| Failed to update uuid of a virtual disk (vmkfstools)" \
-      || continue
-
       progress "Check the amount of free storage space on the hypervisor (df)"
       run_on_hypervisor \
       >"${esxi_free_storage_filepath}" \
@@ -3470,12 +3447,20 @@ function command_create {
         continue
       fi
 
+      progress "Create the virtual disk by cloning the template (vmkfstools)"
+      run_on_hypervisor \
+        "${esxi_id}" \
+        "ssh" \
+        "vmkfstools --clonevirtualdisk \"${vm_esxi_vmdk_template_filepath}\" --diskformat zeroedthick \"${vm_esxi_vmdk_filepath}\"" \
+        "|| Failed to clone the template (vmkfstools)" \
+      || continue
+
       progress "Extend the HDD to specified size (vmkfstools)"
       run_on_hypervisor \
         "${esxi_id}" \
         "ssh" \
         "set -o pipefail" \
-        "template_size_kb=\$(awk 'BEGIN { blocks=0; } \$1 == \"RW\" && \$3 == \"VMFS\" { blocks+=\$2; } END { print blocks/2; }' \"${vm_esxi_vmdk_filepath}\")" \
+        "template_size_kb=\$(awk 'BEGIN { blocks=0; } \$1 == \"RW\" { blocks+=\$2; } END { print blocks/2; }' \"${vm_esxi_vmdk_filepath}\")" \
         "|| Failed to calculate the size of template (awk)" \
         "test ${params[vm_hdd_gb]} -gt \$((template_size_kb/1024/1024))" \
         "|| Unable to extend the HDD due the specified size is less than size of template" \
