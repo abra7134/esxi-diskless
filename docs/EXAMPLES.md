@@ -69,7 +69,7 @@ $ sudo ./build_iso_images.sh build -f xenial-bro
 ```ini
 [defaults]
 # Задаём значения по умолчанию для некоторых параметров, значения остальных определены в самом скрипте
-local_iso_path=xenial-bro-210905-7558e38c.iso
+local_iso_path=xenial-bro-211227-63f26add.iso
 vm_esxi_datastore=hdd1
 vm_ipv4_gateway=127.0.0.1
 vm_network_name="wan"
@@ -99,14 +99,16 @@ vm1-example11 at="esxi3" vm_ipv4_address="127.0.0.12"
 vm-example12 at="esxi2" \
   vm_autostart="yes" \
   vm_ipv4_address="127.0.0.13" \
-  vm_memory_mb=1024
+  vm_memory_mb=1024 \
+  local_iso_path="" \
+  local_vmdk_path="ubuntu-focal.vmdk" \
+  vm_hdd_gb="10"
 ```
 
 ##### Примеры использования
 
 Создание всех виртуальных машин на `esxi1` и `esxi2` гипервизорах с информированием о необходимости
-включения
-менеджера автостарта виртуальных машин где это необходимо (опция `-da`):
+включения менеджера автостарта виртуальных машин где это необходимо (опция `-da`):
 ```bash
 $ ./control_vm_esxi.sh create -da esxi1 esxi2
 ```
@@ -129,7 +131,7 @@ $ ./control_vm_esxi.sh destroy -fs vm-example10
 ```
 
 Уничтожение виртуальной машины `test1` на `esxi2` гипервизоре, не описанной в конфигурационном файле и пропуском
-удаления неиспользуемых `ISO`-образов на гипервизоре (опция `-sr`):
+удаления неиспользуемых `ISO`-образов и `HDD`-шаблонов на гипервизоре (опция `-sr`):
 ```bash
 $ ./control_vm_esxi.sh destroy -sr esxi2/test1
 ```
@@ -174,13 +176,13 @@ $ CACHE_VALID="-" ./control_vm_esxi.sh show -n vm-example10
 ./control_vm_esxi.sh update vm_dns_servers vm-example10
 ```
 
-Предварительная загрузка необходимых `ISO`-образов на все гипервизоры:
+Предварительная загрузка необходимых `ISO`-образов и `HDD`-шаблонов на все гипервизоры:
 ```bash
 ./control_vm_esxi.sh upload all
 ```
 
-Предварительная загрузка необходимых `ISO`-образов для `vm-example10` и `vm-example12` виртуальных машин без проверки
-корректности контрольных сумм в `.sha1`-файлах (т.е. доверяя содержимому `.sha1` файлов) (опция `-t`):
+Предварительная загрузка необходимых `ISO`-образов и `HDD`-шаблонов для `vm-example10` и `vm-example12` виртуальных
+машин без проверки корректности контрольных сумм в `.sha1`-файлах (т.е. доверяя содержимому `.sha1` файлов) (опция `-t`):
 ```bash
 ./control_vm_esxi.sh upload -t vm-example10 vm-example12
 ```
