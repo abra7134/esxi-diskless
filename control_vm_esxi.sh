@@ -360,22 +360,22 @@ function check_vm_params {
       local \
         param="" \
         param_value=""
-      for param in "${check_vm_param/#all/hook image iso vmdk}"
+      for param in "${check_vm_param/#all/local_hook_path local_image_path local_iso_path local_vmdk_path}"
       do
-        param_value="${params[local_${param}_path]}"
+        param_value="${params[${param}]}"
         if [ -n "${param_value}" ]
         then
           if [ ! -f "${param_value}" ]
           then
             skipping \
-              "The specified ${param}-file path '${param_value}' is not exists" \
+              "The specified ${param} file '${param_value}' is not exists" \
               "Please check it, correct and try again"
             return 1
           elif [    "${param}" = "hook" \
                  -a ! -x "${param_value}" ]
           then
             skipping \
-              "The specified ${param}-file path '${param_value}' is not executable" \
+              "The specified ${param} file '${param_value}' is not executable" \
               "Please set right permissions (+x) and try again"
             return 1
           fi
