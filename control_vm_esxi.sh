@@ -2894,6 +2894,7 @@ function upload_images {
 
     local_image_path="${params[local_image_path]}"
     esxi_image_path="${params[esxi_image_path]}"
+    image_status="not found"
 
     info "Will upload a '${local_image_path}' image/template to '${params[esxi_datastore]}' on '${esxi_name}' hypervisor"
 
@@ -2913,55 +2914,6 @@ function upload_images {
       fi
     done
 
-    local_image_sha1sum=""
-    local_image_sha1sum_path="${local_image_path}.sha1"
-
-    if [ -f "${local_image_sha1sum_path}" ]
-    then
-      progress "Read the checksum from '${local_image_sha1sum_path}' file"
-      if ! \
-        read_sha1sum \
-          "${local_image_sha1sum_path}"
-      then
-        my_params[${image_id}.status]="image problem"
-        continue
-      fi
-
-      local_image_sha1sum="${sha1sum}"
-    fi
-
-    if [ -z "${local_image_sha1sum}" \
-         -o "${my_options[-t]}" != "yes" ]
-    then
-      progress "Calculate the checksum of image (sha1sum)"
-      if ! \
-        sha1sum \
-          "${local_image_path}" \
-        >"${temp_image_sha1sum_path}"
-      then
-        skipping \
-          "Unable to calculate the checksum of image (sha1sum)"
-        my_params[${image_id}.status]="image problem"
-        continue
-      fi
-
-      read_sha1sum \
-        "${temp_image_sha1sum_path}" \
-      || continue
-      real_image_sha1sum="${sha1sum}"
-
-      if [ -z "${local_image_sha1sum}" ]
-      then
-        local_image_sha1sum="${real_image_sha1sum}"
-      elif [ "${local_image_sha1sum}" != "${real_image_sha1sum}" ]
-      then
-        skipping \
-          "The calculated checksum of image don't equal to checksum in .sha1 file"
-        my_params[${image_id}.status]="image problem"
-        continue
-      fi
-    fi
-
     progress "Checking the connection to '${esxi_name}' hypervisor (mkdir)"
     run_on_hypervisor \
       "${esxi_id}" \
@@ -2970,7 +2922,6 @@ function upload_images {
       "|| Failed to create directory for storing images on hypervisor" \
     || continue
 
-    image_status="uploaded"
     progress "Checking existance the image file on '${esxi_name}' hypervisor (test -f)"
     if \
       run_on_hypervisor \
@@ -2983,9 +2934,59 @@ function upload_images {
       || image_status="exist"
     fi
 
-    if [ "${image_status}" != "exist" ]
+    if [    "${image_status}" = "not found" \
+         -o "${image_status}" = "need check" ]
     then
-      if [ "${image_status}" = "uploaded" ]
+      local_image_sha1sum=""
+      local_image_sha1sum_path="${local_image_path}.sha1"
+
+      if [ -f "${local_image_sha1sum_path}" ]
+      then
+        progress "Read the checksum from '${local_image_sha1sum_path}' file"
+        if ! \
+          read_sha1sum \
+            "${local_image_sha1sum_path}"
+        then
+          my_params[${image_id}.status]="image problem"
+          continue
+        fi
+
+        local_image_sha1sum="${sha1sum}"
+      fi
+
+      if [ -z "${local_image_sha1sum}" \
+           -o "${my_options[-t]}" != "yes" ]
+      then
+        progress "Calculate the checksum of image (sha1sum)"
+        if ! \
+          sha1sum \
+            "${local_image_path}" \
+          >"${temp_image_sha1sum_path}"
+        then
+          skipping \
+            "Unable to calculate the checksum of image (sha1sum)"
+          my_params[${image_id}.status]="image problem"
+          continue
+        fi
+
+        read_sha1sum \
+          "${temp_image_sha1sum_path}" \
+        || continue
+        real_image_sha1sum="${sha1sum}"
+
+        if [ -z "${local_image_sha1sum}" ]
+        then
+          local_image_sha1sum="${real_image_sha1sum}"
+        elif [ "${local_image_sha1sum}" != "${real_image_sha1sum}" ]
+        then
+          skipping \
+            "The calculated checksum of image don't equal to checksum in .sha1 file"
+          my_params[${image_id}.status]="image problem"
+          continue
+        fi
+      fi
+
+      if [ "${image_status}" = "not found" ]
       then
         esxi_image_path+="${temp_image_suffix}"
       fi
@@ -2993,7 +2994,7 @@ function upload_images {
       let attempts=5
       while [ ${attempts} -gt 0 ]
       do
-        if [ "${image_status}" = "uploaded" ]
+        if [ "${image_status}" = "not found" ]
         then
           progress "Upload the image to temporary file on '${esxi_name}' hypervisor (scp)"
           run_on_hypervisor \
@@ -3020,7 +3021,7 @@ function upload_images {
 
         if [ "${local_image_sha1sum}" = "${remote_image_sha1sum}" ]
         then
-          if [ "${image_status}" = "uploaded" ]
+          if [ "${image_status}" = "not found" ]
           then
             progress "Rename the temporary image file (mv)"
             run_on_hypervisor \
@@ -3032,12 +3033,17 @@ function upload_images {
           fi
 
           break
-        fi
-
-        if [ "${image_status}" = "need check" ]
+        elif [ "${image_status}" = "need check" ]
         then
           skipping \
             "The calculated checksum of image on hypervisor don't equal to checksum on this machine"
+          continue 2
+        elif [ "${my_options[-t]}" = "yes" ]
+        then
+          skipping \
+            "The checksum of uploaded image on hypervisor is not correct" \
+            "checksum specified in .sha1 file may not be correct," \
+            "for enable retry attempts please don't use the '-t' option"
           continue 2
         fi
 
@@ -3065,7 +3071,7 @@ function upload_images {
       "need check" )
         my_image_ids[${image_id}]="${COLOR_YELLOW}UPLOAD NOT REQUIRED/FORCE CHECKED${COLOR_NORMAL} (Already exists)"
         ;;
-      "uploaded" )
+      "not found" )
         my_image_ids[${image_id}]="${COLOR_GREEN}UPLOADED${COLOR_NORMAL}"
         ;;
       * )
