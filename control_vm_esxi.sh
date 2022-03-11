@@ -98,6 +98,7 @@ declare -A \
   my_options_desc=(
     [-d]="Destroy the same virtual machine on another hypervisor (migration analogue)"
     [-da]="Don't enable hypervisor's autostart manager automatically if it's disabled"
+    [-ed]="Enable destroy virtual machines with hard disk (!!! use with caution)"
     [-f]="Recreate a virtual machine on destination hypervisor if it already exists"
     [-ff]="Force check checksums for existed images/templates on hypervisor"
     [-fr]="Force reboot (use reset instead) if 'vmware-tools' package is not installed"
@@ -514,6 +515,18 @@ function esxi_vm_simple_command {
     vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}" \
     vm_state_filepath="${temp_dir}/vm_state" \
     vm_state=""
+
+  if [    "${vm_operation}" = "destroy" \
+       -a -n "${my_params[${real_vm_id}.special.vm_hdd_gb]}" \
+       -a "${my_options[-ed]}" != "yes" ]
+  then
+    skipping \
+      "Destroying a virtual machine with a hard disk is not safe and disabled by default" \
+      "If you are confident in your actions, please use the '-ed' option" \
+      "And remember to save a hard disk backup before destroying the virtual machine" \
+      "The operation is irreversible, be careful"
+    return 1
+  fi
 
   progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
 
@@ -3098,7 +3111,7 @@ function command_create {
   fi
 
   local \
-    supported_my_options=("-d" "-da" "-f" "-ff" "-fs" "-i" "-n" "-sn" "-sr" "-t")
+    supported_my_options=("-d" "-da" "-ed" "-f" "-ff" "-fs" "-i" "-n" "-sn" "-sr" "-t")
 
   if [ "${#}" -lt 1 ]
   then
@@ -3235,6 +3248,19 @@ function command_create {
     check_vm_params \
       all \
     || continue
+
+    if [    "${my_options[-d]}" = "yes" \
+         -a "${my_options[-ed]}" != "yes" \
+         -a -n "${my_params[${another_vm_real_id}.special.vm_hdd_gb]}" ]
+    then
+      skipping \
+        "Unable destroy the same name virtual machine on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor" \
+        "Destroying a virtual machine with a hard disk is not safe and disabled by default" \
+        "If you are confident in your actions, please use the '-ed' option" \
+        "And remember to save a hard disk backup before destroying the virtual machine" \
+        "The operation is irreversible, be careful"
+      continue
+    fi
 
     my_params[${another_vm_real_id}.vm_id]="${vm_id}"
 
@@ -3722,7 +3748,7 @@ function command_destroy {
   if [ -z "${supported_my_options}" ]
   then
     local \
-      supported_my_options=("-fs" "-sr")
+      supported_my_options=("-ed" "-fs" "-sr")
   fi
 
   if [ "${#}" -lt 1 ]
