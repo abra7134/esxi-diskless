@@ -847,8 +847,6 @@ function get_real_vm_list {
     then
       echo "    Use the cache file '${cachefile_path}"
     else
-      echo "    Write the cache file '${cachefile_path}'"
-
       local \
         cachefile_dir="${cachefile_path%/*}"
       if ! \
@@ -866,6 +864,8 @@ function get_real_vm_list {
       >"${cachefile_path}" \
         "${@}" \
       || return 1
+
+      echo "    Writed the cache file '${cachefile_path}'"
     fi
 
     return 0
@@ -3186,6 +3186,7 @@ function command_create {
 
     vm_real_id=""
     another_esxi_names=()
+    another_vm_real_id=""
     # Preparing the esxi list where the virtual machine is located
     for real_vm_id in "${!my_real_vm_list[@]}"
     do
@@ -3222,11 +3223,7 @@ function command_create {
       continue
     elif [ "${my_options[-d]}" = "yes" ]
     then
-      if [ ${#another_esxi_names[@]} -lt 1 ]
-      then
-        # If a virtual machine is not found anywhere, then you do not need to destroy it
-        my_options[-d]=""
-      elif [ "${#another_esxi_names[@]}" -gt 1 ]
+      if [ "${#another_esxi_names[@]}" -gt 1 ]
       then
         skipping \
           "The virtual machine exists on more than one hypervisors" \
@@ -3249,7 +3246,7 @@ function command_create {
       all \
     || continue
 
-    if [    "${my_options[-d]}" = "yes" \
+    if [ -n "${another_vm_real_id}" \
          -a "${my_options[-ed]}" != "yes" \
          -a -n "${my_params[${another_vm_real_id}.special.vm_hdd_gb]}" ]
     then
@@ -3605,7 +3602,7 @@ function command_create {
         autostart_seq
     fi
 
-    if [ "${my_options[-d]}" = "yes" ]
+    if [ -n "${another_vm_real_id}" ]
     then
       esxi_vm_simple_command \
         "power shutdown" \
@@ -3618,7 +3615,7 @@ function command_create {
         "power on" \
         "${vm_real_id}"
     then
-      if [ "${my_options[-d]}" = "yes" ]
+      if [ -n "${another_vm_real_id}" ]
       then
         if ! \
           esxi_vm_simple_command \
@@ -3649,7 +3646,7 @@ function command_create {
         "No connectivity to virtual machine" \
         "Please verify that the virtual machine is up manually"
 
-      if [ "${my_options[-d]}" = "yes" ]
+      if [ -n "${another_vm_real_id}" ]
       then
         if ! \
           esxi_vm_simple_command \
@@ -3683,7 +3680,7 @@ function command_create {
     my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED/PINGED${COLOR_NORMAL}"
     let runned_vms+=1
 
-    if [ "${my_options[-d]}" = "yes" ]
+    if [ -n "${another_vm_real_id}" ]
     then
       if ! \
         esxi_vm_simple_command \
@@ -3710,7 +3707,7 @@ function command_create {
       fi
     fi
 
-    if [ "${my_options[-d]}" = "yes" ]
+    if [ -n "${another_vm_real_id}" ]
     then
       my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (Destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
