@@ -2355,71 +2355,113 @@ function remove_images {
   return 0
 }
 
-# Function to run hook script
+# Function to run hook script and update the status of virtual machine
 #
-#  Input: ${1}         - The hook type (create, destroy, reboot)
-#         ${2}         - The hook path (must be executable regular file or directory)
-#         ${3}         - The name of virtual machine for which the hook is called
-#         ${4}         - The hypervisor name on which the virtual machine is serviced
-#         ${params[@]} - The associative array with virtual machine and hypervisor parameters
-# Output: >&1          - The stdout from hook script
-# Return: 0            - The hook script called is ok
-#         another      - Otherwise
+# Input:  ${1}             - The virtual machine identifier at ${my_config_vm_list[@]} array
+#         ${2}             - The name of virtual machine for which the hook is called
+#         ${3}             - The hypervisor name on which the virtual machine is serviced
+#         ${command_name}  - The name of runned command
+#         ${params[@]}     - The associative array with virtual machine and hypervisor parameters
+# Modify: ${my_vm_ids[@]}  - GLOBAL (see description at top)
+# Output: >&1              - The stdout from hook script
+# Return: 0                - Always
 #
 function run_hook {
   local \
-    hook_type="${1}" \
-    hook_path="${2}" \
-    vm_name="${3}" \
-    esxi_name="${4}"
-  local \
-    hooks_list="" \
-    hooks_status=0
+    vm_id="${1}" \
+    vm_name="${2}" \
+    esxi_name="${3}"
 
-  export \
-    ESXI_NAME="${esxi_name}" \
-    ESXI_HOSTNAME="${params[esxi_hostname]}" \
-    TYPE="${hook_type}" \
-    VM_IPV4_ADDRESS="${params[vm_ipv4_address]}" \
-    VM_SSH_PASSWORD="${params[vm_ssh_password]}" \
-    VM_SSH_PORT="${params[vm_ssh_port]}" \
-    VM_SSH_USERNAME="${params[vm_ssh_username]}" \
-    VM_NAME="${vm_name}"
+  [ -z "${params[local_hook_path]}" ] \
+  && return 0
+
+  local \
+    hook_path="${params[local_hook_path]}" \
+    hook_type="${command_name}" \
+    hooks_list="" \
+    hooks_status=0 \
+    vm_status="${my_vm_ids[${vm_id}]}" \
+    vm_status_description=""
+
+  # Transformating the 'vm_status' value to 'vm_status' and 'vm_status_description'
+  #
+  # \e[1;31mCREATED/PINGED/OLD DESTROYED\e[0m (Destroyed ...) (Runned on ...)
+  # ^^^^^^^^                            ^^^^^                                 step1: Removing
+  #                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ step2: -> vm_status_description
+  #                                                         ^^^               step3: Replace to ', '
+  #                                                                         ^ step4: Removing
+  #         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^                                      step5: -> vm_status
+  shopt -s extglob
+  vm_status="${vm_status//\\e\[+([0-9;])m}"                   # step1
+  shopt -u extglob
+  vm_status_description="${vm_status#*\(}"                    # step2
+  if [ "${vm_status_description}" != "${vm_status}" ]
+  then
+    vm_status_description="${vm_status_description//) (/, }"  # step3
+    vm_status_description="${vm_status_description%)}"        # step4
+  else
+    vm_status_description=""
+  fi
+  vm_status="${vm_status%% (*}"                               # step5
 
   progress "Get the list of hooks executables (ls)"
-  hooks_list=$(
-    ls -1 \
-    "${hook_path}"
-  ) \
-  || return 1
+  if ! \
+    hooks_list=$(
+      ls -1 \
+      "${hook_path}"
+    )
+  then
+    let hooks_status=1
+  else
+    export \
+      ESXI_NAME="${esxi_name}" \
+      ESXI_HOSTNAME="${params[esxi_hostname]}" \
+      STATUS="${vm_status}" \
+      STATUS_DESCRIPTION="${vm_status_description}" \
+      TYPE="${hook_type}" \
+      VM_IPV4_ADDRESS="${params[vm_ipv4_address]}" \
+      VM_SSH_PASSWORD="${params[vm_ssh_password]}" \
+      VM_SSH_PORT="${params[vm_ssh_port]}" \
+      VM_SSH_USERNAME="${params[vm_ssh_username]}" \
+      VM_NAME="${vm_name}"
 
-  while \
-    read f
-  do
-    [ -d "${hook_path}" ] \
-    && f="${hook_path%/}/${f}"
+    while \
+      read f
+    do
+      [ -d "${hook_path}" ] \
+      && f="${hook_path%/}/${f}"
 
-    if [ -x "${f}" ]
-    then
-      progress "Run the hook script '${f}' (TYPE='${TYPE}')"
-      "${f}" \
-      || \
-        let hooks_status=1
-    fi
-  done \
-  <<<"${hooks_list}"
+      if [ -x "${f}" ]
+      then
+        progress "Run the hook script '${f}' (TYPE='${TYPE}')"
+        "${f}" \
+        || \
+          let hooks_status=1
+      fi
+    done \
+    <<<"${hooks_list}"
 
-  export -n \
-    ESXI_NAME \
-    ESXI_HOSTNAME \
-    TYPE \
-    VM_IPV4_ADDRESS \
-    VM_SSH_PASSWORD \
-    VM_SSH_PORT \
-    VM_SSH_USERNAME \
-    VM_NAME
+    export -n \
+      ESXI_NAME \
+      ESXI_HOSTNAME \
+      STATUS \
+      STATUS_DESCRIPTION \
+      TYPE \
+      VM_IPV4_ADDRESS \
+      VM_SSH_PASSWORD \
+      VM_SSH_PORT \
+      VM_SSH_USERNAME \
+      VM_NAME
+  fi
 
-  return "${hooks_status}"
+  if [ "${hooks_status}" -gt 0 ]
+  then
+    my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/ (/${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL} (}"
+  else
+    my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/ (/${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL} (}"
+  fi
+
+  return 0
 }
 
 # Function to run remote command on hypervisor through SSH-connection
@@ -3150,6 +3192,7 @@ function command_create {
     esxi_id="" \
     esxi_name="" \
     image_id="" \
+    last_vm_id="" \
     param="" \
     real_vm_id="" \
     temp_file="" \
@@ -3170,8 +3213,18 @@ function command_create {
   esxi_free_memory_filepath="${temp_dir}/esxi_free_memory"
   esxi_free_storage_filepath="${temp_dir}/esxi_free_storage"
 
-  for vm_id in "${my_vm_ids_ordered[@]}"
+  for vm_id in "${my_vm_ids_ordered[@]}" hook
   do
+    run_hook \
+      "${last_vm_id}" \
+      "${vm_name}" \
+      "${esxi_name}"
+
+    # This is only for correct running hook for the last virtual machine
+    [ "${vm_id}" = "hook" ] \
+    && continue
+
+    last_vm_id="${vm_id}"
     vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
@@ -3687,29 +3740,11 @@ function command_create {
           "destroy" \
           "${another_vm_real_id}"
       then
-        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK NOT RUNNED/NOT OLD DESTROYED${COLOR_YELLOW} (See details above)"
+        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/NOT OLD DESTROYED${COLOR_NORMAL} (See details above)"
         continue
-      fi
-    fi
-
-    if [ -n "${params[local_hook_path]}" ]
-    then
-      if ! \
-        run_hook \
-          "create" \
-          "${params[local_hook_path]}" \
-          "${vm_name}" \
-          "${esxi_name}"
-      then
-        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL}"
       else
-        my_vm_ids[${vm_id}]+="${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL}"
+        my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (Destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
       fi
-    fi
-
-    if [ -n "${another_vm_real_id}" ]
-    then
-      my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (Destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
     fi
 
     if [ -n "${params[local_iso_path]}" \
@@ -3775,11 +3810,22 @@ function command_destroy {
     processed_vms=0 \
     esxi_id="" \
     esxi_name="" \
+    last_vm_id="" \
     vm_id="" \
     vm_name=""
 
-  for vm_id in "${my_vm_ids_ordered[@]}"
+  for vm_id in "${my_vm_ids_ordered[@]}" hook
   do
+    run_hook \
+      "${last_vm_id}" \
+      "${vm_name}" \
+      "${esxi_name}"
+
+    # This is only for correct running hook for the last virtual machine
+    [ "${vm_id}" = "hook" ] \
+    && continue
+
+    last_vm_id="${vm_id}"
     vm_name="${my_real_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
@@ -3875,22 +3921,6 @@ function command_destroy {
 
     my_vm_ids[${vm_id}]="${COLOR_GREEN}${command_name^^}ED${COLOR_NORMAL}"
     let processed_vms+=1
-
-    if [ -n "${params[local_hook_path]}" ]
-    then
-      if ! \
-        run_hook \
-          "${command_name}" \
-          "${params[local_hook_path]}" \
-          "${vm_name}" \
-          "${esxi_name}"
-      then
-        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL}"
-      else
-        my_vm_ids[${vm_id}]+="${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL}"
-      fi
-    fi
-
   done
 
   if [ "${command_name}" = "destroy" ]
