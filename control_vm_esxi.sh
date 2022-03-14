@@ -3721,7 +3721,7 @@ function command_create {
 
         my_vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (See details above)"
       else
-        my_vm_ids[${vm_id}]="${COLOR_YELLOW}${vm_recreated:+RE}CREATED/NO PINGING${COLOR_NORMAL}"
+        my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED${COLOR_YELLOW}/NO PINGING${COLOR_NORMAL}"
       fi
 
       let no_pinging_vms+=1
@@ -3898,7 +3898,13 @@ function command_destroy {
       fi
 
       echo "    The virtual machine is rebooted"
+    fi
 
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}${command_name^^}ED${COLOR_NORMAL}"
+    let processed_vms+=1
+
+    if [ "${command_name}" != "destroy" ]
+    then
       progress "Checking the network availability of the virtual machine (ping)"
       let attempts=10
       until
@@ -3912,15 +3918,11 @@ function command_destroy {
 
       if [ "${attempts}" -lt 1 ]
       then
-        skipping \
-          "No connectivity to virtual machine after ${command_name}" \
-          "Please check the state of the virtual machine manually"
-        continue
+        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/NO PINGING${COLOR_NORMAL}"
+      else
+        my_vm_ids[${vm_id}]+="${COLOR_GREEN}/PINGING${COLOR_NORMAL}"
       fi
     fi
-
-    my_vm_ids[${vm_id}]="${COLOR_GREEN}${command_name^^}ED${COLOR_NORMAL}"
-    let processed_vms+=1
   done
 
   if [ "${command_name}" = "destroy" ]
