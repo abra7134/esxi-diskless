@@ -4447,6 +4447,7 @@ function command_update {
     cdrom_iso_path="" \
     esxi_id="" \
     esxi_name="" \
+    last_vm_id="" \
     real_vm_id="" \
     vm_esxi_vmx_filepath="" \
     vm_id="" \
@@ -4456,8 +4457,18 @@ function command_update {
     update_param_old_value="" \
     updated_vms=0
 
-  for vm_id in "${my_vm_ids_ordered[@]}"
+  for vm_id in "${my_vm_ids_ordered[@]}" hook
   do
+    run_hook \
+      "${last_vm_id}" \
+      "${vm_name}" \
+      "${esxi_name}"
+
+    # This is only for correct running hook for the last virtual machine
+    [ "${vm_id}" = "hook" ] \
+    && continue
+
+    last_vm_id="${vm_id}"
     vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
@@ -4520,8 +4531,7 @@ function command_update {
     update_param_old_value="${my_params[${vm_real_id}.${update_param_mapped}]:-}"
     if [ "${params[${update_param}]}" = "${update_param_old_value}" ]
     then
-      skipping \
-        "No update required, parameter already has the required value"
+      my_vm_ids[${vm_id}]="${COLOR_YELLOW}UPDATE NOT REQUIRED${COLOR_NORMAL}"
       continue
     fi
 
