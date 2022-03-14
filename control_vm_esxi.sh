@@ -6,7 +6,7 @@
 MY_DEPENDENCIES=("govc" "scp" "sort" "ssh" "sshpass" "stat" "ping")
 MY_NAME="Script for simply control of virtual machines on ESXi"
 MY_VARIABLES=("CACHE_DIR" "CACHE_VALID" "ESXI_CONFIG_PATH")
-MY_VERSION="4.220311"
+MY_VERSION="4.220314"
 
 # The directory for saving cache files
 CACHE_DIR="${CACHE_DIR:-"${0%/*}/.cache"}"
