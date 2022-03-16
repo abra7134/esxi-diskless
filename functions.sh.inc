@@ -537,22 +537,25 @@ function show_usage {
   usage_message+=("")
   for option in "${supported_my_options[@]}"
   do
-    if [ -v my_options_desc[${option}] ]
+    if [ -n "${option}" ]
     then
-      printf \
-        -v option_message \
-        -- \
-        "%-9s %-4s %s"\
-        "${first_line:+Options:}" \
-        "${option}" \
-        "${my_options_desc[${option}]}"
-      usage_message+=(
-        "${option_message}"
-      )
-      first_line=""
-    else
-      internal \
-        "The '${option}' option specified at \${supported_my_options[@]} don't exists in \${my_options_desc[@]} array"
+      if [ -v my_options_desc[${option}] ]
+      then
+        printf \
+          -v option_message \
+          -- \
+          "%-9s %-4s %s"\
+          "${first_line:+Options:}" \
+          "${option}" \
+          "${my_options_desc[${option}]}"
+        usage_message+=(
+          "${option_message}"
+        )
+        first_line=""
+      else
+        internal \
+          "The '${option}' option specified at \${supported_my_options[@]} don't exists in \${my_options_desc[@]} array"
+      fi
     fi
   done
 

@@ -1871,7 +1871,9 @@ function parse_cmd_config_list {
     fi
 
     if [    "${command_name}" = "destroy" \
-         -o "${command_name}" = "reboot" ]
+         -o "${command_name}" = "reboot" \
+         -o "${command_name}" = "start" \
+         -o "${command_name}" = "stop" ]
     then
       esxi_name="${arg_name%%/*}"
       if [ "${esxi_name}" != "${arg_name}" ]
@@ -1907,7 +1909,9 @@ function parse_cmd_config_list {
         esxi_id="${my_params[${vm_id}.at]}"
 
         if [    "${command_name}" = "destroy" \
-             -o "${command_name}" = "reboot" ]
+             -o "${command_name}" = "reboot" \
+             -o "${command_name}" = "start" \
+             -o "${command_name}" = "stop" ]
         then
           append_my_ids \
             "${esxi_id}"
@@ -1922,7 +1926,9 @@ function parse_cmd_config_list {
     done
 
     if [    "${command_name}" != "destroy" \
-         -a "${command_name}" != "reboot" ]
+         -a "${command_name}" != "reboot" \
+         -a "${command_name}" != "start" \
+         -a "${command_name}" != "stop" ]
     then
       for esxi_id in "${!my_config_esxi_list[@]}"
       do
@@ -2141,7 +2147,9 @@ function prepare_steps {
       if [ "${my_options[-n]}" = "yes" ]
       then
         if [    "${command_name}" = "destroy" \
-             -o "${command_name}" = "reboot" ]
+             -o "${command_name}" = "reboot" \
+             -o "${command_name}" = "start" \
+             -o "${command_name}" = "stop" ]
         then
           info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only"
         else
@@ -2165,7 +2173,9 @@ function prepare_steps {
       fi
 
       if [    "${command_name}" = "destroy" \
-           -o "${command_name}" = "reboot" ]
+           -o "${command_name}" = "reboot" \
+           -o "${command_name}" = "start" \
+           -o "${command_name}" = "stop" ]
       then
         progress "Parse command line arguments list"
         parse_cmd_real_list "${@}"
@@ -3777,7 +3787,7 @@ function command_destroy {
     return 0
   fi
 
-  if [ -z "${supported_my_options}" ]
+  if [ "${#supported_my_options[*]}" -lt 1 ]
   then
     local \
       supported_my_options=("-ed" "-fs" "-sr")
@@ -3791,6 +3801,20 @@ function command_destroy {
       "to ${command_name} a virtual machine that does not exist in the configuration file" \
       "" \
       "Usage: ${my_name} ${command_name} [options] <vm_name> [vm_name] [<esxi_name>/<vm_name>] ..."
+  fi
+
+  local -A \
+    command_operation_map=(
+      [destroy]="destroy"
+      [reboot]="power reboot"
+      [start]="power on"
+      [stop]="power shutdown"
+    )
+
+  if [ ! -v command_operation_map[${command_name}] ]
+  then
+    internal \
+      "No record in \${command_operation_map[*]} array for \${command_name}=\"${command_name}\""
   fi
 
   # Always scan only necessary hypervisors
@@ -3807,6 +3831,7 @@ function command_destroy {
     params=()
   local \
     attempts=0 \
+    command_status_name="${command_name/stop/stopp}" \
     processed_vms=0 \
     esxi_id="" \
     esxi_name="" \
@@ -3840,7 +3865,8 @@ function command_destroy {
 
     info "Will ${command_name} a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
-    if [ "${command_name}" != "destroy" ]
+    if [    "${command_name}" = "reboot" \
+         -o "${command_name}" = "start" ]
     then
       if [ -z "${params[guestinfo.ipv4_address]}" ]
       then
@@ -3849,7 +3875,10 @@ function command_destroy {
           "There may be a configuration error, the virtual machine can simply be re-created"
         continue
       fi
+    fi
 
+    if [ "${command_name}" = "reboot" ]
+    then
       progress "Checking the network availability of the virtual machine (ping)"
       let attempts=3
       until
@@ -3872,13 +3901,14 @@ function command_destroy {
     fi
 
     esxi_vm_simple_command \
-      "${command_name/reboot/power reboot}" \
+      "${command_operation_map[${command_name}]}" \
       "${vm_id}" \
     || continue
 
-    if [ "${command_name}" != "destroy" ]
+    if [    "${command_name}" = "reboot" \
+         -o "${command_name}" = "stop" ]
     then
-      progress "Waiting for the virtual machine to reboot (ping)"
+      progress "Waiting for the virtual machine to ${command_name} (ping)"
       let attempts=10
       until
         [ "${attempts}" -lt 1 ] \
@@ -3897,13 +3927,14 @@ function command_destroy {
         continue
       fi
 
-      echo "    The virtual machine is rebooted"
+      echo "    The virtual machine is ${command_status_name}ed"
     fi
 
-    my_vm_ids[${vm_id}]="${COLOR_GREEN}${command_name^^}ED${COLOR_NORMAL}"
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}${command_status_name^^}ED${COLOR_NORMAL}"
     let processed_vms+=1
 
-    if [ "${command_name}" != "destroy" ]
+    if [    "${command_name}" = "reboot" \
+         -o "${command_name}" = "start" ]
     then
       progress "Checking the network availability of the virtual machine (ping)"
       let attempts=10
@@ -4372,6 +4403,32 @@ function command_show {
   fi
 
   exit 0
+}
+
+function command_start {
+  if [ "${1}" = "description" ]
+  then
+    echo "Start (power on) virtual machine(s)"
+    return 0
+  fi
+
+  local \
+    supported_my_options=("")
+
+  command_destroy "${@}"
+}
+
+function command_stop {
+  if [ "${1}" = "description" ]
+  then
+    echo "Stop (shutdown) virtual machine(s)"
+    return 0
+  fi
+
+  local \
+    supported_my_options=("-fs")
+
+  command_destroy "${@}"
 }
 
 function command_update {

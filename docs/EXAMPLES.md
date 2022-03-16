@@ -136,6 +136,11 @@ $ ./control_vm_esxi.sh destroy -fs vm-example10
 $ ./control_vm_esxi.sh destroy -sr esxi2/test1
 ```
 
+Уничтожение виртуальной машины `vm-example12` с `HDD`-диском (опция `-ed`):
+```bash
+$ ./control_vm_esxi.sh destroy -ed vm-exmaple12
+```
+
 Отображение виденья всего конфигурационного файла скриптом:
 ```bash
 $ ./control_vm_esxi.sh ls all
@@ -162,6 +167,17 @@ $ ./control_vm_esxi.sh show -i esxi3
 момент состояния для `vm-example10` виртуальной машины без построения полной карты расположения виртуальных машин (опция `-n`):
 ```bash
 $ CACHE_VALID="-" ./control_vm_esxi.sh show -n vm-example10
+```
+
+Включение ранее выключенной виртуальной машины `vm-example10`:
+```bash
+$ ./control_vm_esxi.sh start vm-example10
+```
+
+Выключение виртуальной машины `test3` на `esxi1` гипервизоре, не описанной в конфигурационном файле с принудительным
+выключением, если `vmware-tools` не запущен (опция `-fs`):
+```bash
+$ ./control_vm_esxi.sh stop -fs esxi1/test3
 ```
 
 Замена `ISO`-образов на лету для всех виртуальных машин на `esxi2`-гипервизоре, с принудительной проверкой
