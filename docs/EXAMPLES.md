@@ -174,6 +174,11 @@ $ CACHE_VALID="-" ./control_vm_esxi.sh show -n vm-example10
 $ ./control_vm_esxi.sh start vm-example10
 ```
 
+Получение статуса питания виртуальной машины `test1` на `esxi2` гипервизоре, не описанной в конфигурационном файле:
+```bash
+$ ./control_vm_esxi.sh status esxi2/test1
+```
+
 Выключение виртуальной машины `test3` на `esxi1` гипервизоре, не описанной в конфигурационном файле с принудительным
 выключением, если `vmware-tools` не запущен (опция `-fs`):
 ```bash

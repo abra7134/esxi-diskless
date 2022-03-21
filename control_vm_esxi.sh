@@ -411,11 +411,12 @@ function check_vm_params {
 
 # Function to run simple operation on virtual machine
 #
-# Input:  ${1}                      - The virtual machine operation: 'destroy', 'power on', 'power off', 'power reboot', 'power reset' or 'power shutdown'
+# Input:  ${1}                      - The virtual machine operation: 'destroy', 'power on', 'power off', 'power reboot', 'power reset', 'power shutdown' or 'status'
 #         ${2}                      - The virtual machine identifier at ${my_real_vm_list[@]} array
 #         ${temp_dir}               - The temporary directory to save commands outputs
 #         ${my_params[@]}           - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+# Modify: ${vm_state}               - The state of virtual machine
 # Return: 0                         - If simple operation is successful
 #         another                   - In other cases
 #
@@ -498,10 +499,11 @@ function esxi_vm_simple_command {
        -a "${vm_operation}" != "power off" \
        -a "${vm_operation}" != "power reboot" \
        -a "${vm_operation}" != "power reset" \
-       -a "${vm_operation}" != "power shutdown" ]
+       -a "${vm_operation}" != "power shutdown" \
+       -a "${vm_operation}" != "status" ]
   then
     internal \
-      "The \${vm_operation} must be 'destroy', 'power on', 'power off', 'power reboot', 'power reset' or 'power shutdown', but not '${vm_operation}'"
+      "The \${vm_operation} must be 'destroy', 'power on', 'power off', 'power reboot', 'power reset', 'power shutdown' or 'status', but not '${vm_operation}'"
   elif [ ! -v my_real_vm_list[${real_vm_id}] ]
   then
     internal \
@@ -513,8 +515,9 @@ function esxi_vm_simple_command {
   local \
     esxi_name="${my_config_esxi_list[${esxi_id}]}" \
     vm_esxi_id="${my_params[${real_vm_id}.vm_esxi_id]}" \
-    vm_state_filepath="${temp_dir}/vm_state" \
-    vm_state=""
+    vm_state_filepath="${temp_dir}/vm_state"
+
+  vm_state=""
 
   if [    "${vm_operation}" = "destroy" \
        -a -n "${my_params[${real_vm_id}.special.vm_hdd_gb]}" \
@@ -528,10 +531,13 @@ function esxi_vm_simple_command {
     return 1
   fi
 
-  progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
-
   esxi_get_vm_state \
   || return 1
+
+  [ "${vm_operation}" = "status" ] \
+  && return 0
+
+  progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
 
   if [ "${vm_state}" = "Powered on" ]
   then
@@ -558,8 +564,11 @@ function esxi_vm_simple_command {
     return 0
   fi
 
-  if [ "${vm_state}" != "Absent" ]
+  if [ "${vm_state}" = "Absent" ]
   then
+    echo "    Skipping ${vm_operation/status/status request} because a virtual machine is absent on hypervisor"
+    echo "    Probably the cache is out of date..."
+  else
     if [    "${vm_operation}" = "power shutdown" \
          -o "${vm_operation}" = "power reboot" ]
     then
@@ -614,9 +623,6 @@ function esxi_vm_simple_command {
       "vim-cmd vmsvc/${vm_operation// /.} \"${vm_esxi_id}\" >/dev/null" \
       "|| Failed to ${vm_operation} machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})" \
     || return 1
-  else
-    echo "    Skipping ${vm_operation} because a virtual machine is absent on hypervisor"
-    echo "    Probably the cache is out of date..."
   fi
 
   if [ "${vm_operation}" = "destroy" ]
@@ -784,7 +790,7 @@ function get_image_id {
 
 # The function for retrieving registered virtual machines list on specified hypervisors
 #
-#  Input: ${1}                  - The type of retrieving ('full' with vm parameters and 'simple')
+#  Input: ${1}                  - The type of retrieving ('full' with vm parameters, 'simple' and 'very simple')
 #         ${@}                  - The list esxi'es identifiers to
 #         ${temp_dir}           - The temporary directory to save cache files if CACHE_DIR="-"
 #         ${CACHE_DIR}          - GLOBAL (see description at top)
@@ -799,6 +805,14 @@ function get_real_vm_list {
   local \
     get_type="${1}"
   shift
+
+  if [    "${get_type}" != "full" \
+       -a "${get_type}" != "simple" \
+       -a "${get_type}" != "very simple" ]
+  then
+    internal \
+      "Only 'full', 'simple' and 'very simple' values supported as first parameter"
+  fi
 
   # The fucntion to update or not the cache file
   #
@@ -930,122 +944,127 @@ function get_real_vm_list {
   do
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
-    progress "Prepare a virtual machines map/autostart settings/filesystem storage on the '${esxi_name}' hypervisor"
-
-    autostart_defaults_map_filepath=$(
-      get_cachefile_path_for \
-        "${esxi_id}" \
-        autostart_defaults
-    )
-    if ! \
-      update_cachefile \
-        "${autostart_defaults_map_filepath}" \
-        "${esxi_id}" \
-        "ssh" \
-        "vim-cmd hostsvc/autostartmanager/get_defaults" \
-        "|| Cannot get the autostart defaults settings (vim-cmd hostsvc/autostartmanager/get_defaults)"
+    if [ "${get_type}" = "very simple" ]
     then
-      skipping \
-        "Failed to update '${autostart_defaults_map_filepath}' cachefile"
-      check_skip_options
-      continue
-    fi
+      progress "Prepare a virtual machines map on the '${esxi_name}' hypervisor"
+    else
+      progress "Prepare a virtual machines map/autostart settings/filesystem storage on the '${esxi_name}' hypervisor"
 
-    if [    -f "${autostart_defaults_map_filepath}" \
-         -a -s "${autostart_defaults_map_filepath}" ]
-    then
-      while \
-        read -r \
-          -u 5 \
-          autostart_defaults_map_str
-      do
-        if [[ "${autostart_defaults_map_str}" =~ ^"(vim.host.AutoStartManager.SystemDefaults) {"$ ]]
-        then
-          continue
-        elif [[ "${autostart_defaults_map_str}" =~ ^"}",?$ ]]
-        then
-          break
-        elif [[ "${autostart_defaults_map_str}" =~ ^[[:blank:]]*([^[:blank:]=]+)[[:blank:]]*=[[:blank:]]*\"?([^[:blank:]\",]*)\"?,?$ ]]
-        then
-          autostart_param_name="${BASH_REMATCH[1]}"
-          autostart_param_value="${BASH_REMATCH[2]}"
-          if [ -v my_esxi_autostart_params[${autostart_param_name}] ]
+      autostart_defaults_map_filepath=$(
+        get_cachefile_path_for \
+          "${esxi_id}" \
+          autostart_defaults
+      )
+      if ! \
+        update_cachefile \
+          "${autostart_defaults_map_filepath}" \
+          "${esxi_id}" \
+          "ssh" \
+          "vim-cmd hostsvc/autostartmanager/get_defaults" \
+          "|| Cannot get the autostart defaults settings (vim-cmd hostsvc/autostartmanager/get_defaults)"
+      then
+        skipping \
+          "Failed to update '${autostart_defaults_map_filepath}' cachefile"
+        check_skip_options
+        continue
+      fi
+
+      if [    -f "${autostart_defaults_map_filepath}" \
+           -a -s "${autostart_defaults_map_filepath}" ]
+      then
+        while \
+          read -r \
+            -u 5 \
+            autostart_defaults_map_str
+        do
+          if [[ "${autostart_defaults_map_str}" =~ ^"(vim.host.AutoStartManager.SystemDefaults) {"$ ]]
           then
-            my_params[${esxi_id}.esxi_autostart_${autostart_param_name,,}]="${autostart_param_value}"
+            continue
+          elif [[ "${autostart_defaults_map_str}" =~ ^"}",?$ ]]
+          then
+            break
+          elif [[ "${autostart_defaults_map_str}" =~ ^[[:blank:]]*([^[:blank:]=]+)[[:blank:]]*=[[:blank:]]*\"?([^[:blank:]\",]*)\"?,?$ ]]
+          then
+            autostart_param_name="${BASH_REMATCH[1]}"
+            autostart_param_value="${BASH_REMATCH[2]}"
+            if [ -v my_esxi_autostart_params[${autostart_param_name}] ]
+            then
+              my_params[${esxi_id}.esxi_autostart_${autostart_param_name,,}]="${autostart_param_value}"
+            else
+              skipping \
+                "The unknown '${autostart_param_name}' autostart parameter obtained from hypervisor"
+              continue 2
+            fi
           else
             skipping \
-              "The unknown '${autostart_param_name}' autostart parameter obtained from hypervisor"
+              "Cannot parse the '${autostart_defaults_map_str}' autostart string obtained from hypervisor"
             continue 2
           fi
-        else
-          skipping \
-            "Cannot parse the '${autostart_defaults_map_str}' autostart string obtained from hypervisor"
-          continue 2
-        fi
-      done \
-      5<"${autostart_defaults_map_filepath}"
-    fi
+        done \
+        5<"${autostart_defaults_map_filepath}"
+      fi
 
-    filesystems_map_filepath=$(
-      get_cachefile_path_for \
-        "${esxi_id}" \
-        filesystems
-    )
-    if ! \
-      update_cachefile \
-        "${filesystems_map_filepath}" \
-        "${esxi_id}" \
-        "ssh" \
-        "esxcli storage filesystem list" \
-        "|| Cannot get list of storage filesystems on hypervisor (esxcli storage filesystem list)"
-    then
-      skipping \
-        "Failed to update '${filesystems_map_filepath}' cachefile"
-      check_skip_options
-      continue
-    fi
+      filesystems_map_filepath=$(
+        get_cachefile_path_for \
+          "${esxi_id}" \
+          filesystems
+      )
+      if ! \
+        update_cachefile \
+          "${filesystems_map_filepath}" \
+          "${esxi_id}" \
+          "ssh" \
+          "esxcli storage filesystem list" \
+          "|| Cannot get list of storage filesystems on hypervisor (esxcli storage filesystem list)"
+      then
+        skipping \
+          "Failed to update '${filesystems_map_filepath}' cachefile"
+        check_skip_options
+        continue
+      fi
 
-    filesystem_id=0
-    filesystem_uuids=()
-    if [    -f "${filesystems_map_filepath}" \
-         -a -s "${filesystems_map_filepath}" ]
-    then
-      while \
-        read -r \
-          -u 5 \
-          filesystems_map_str
-      do
-        if [[ "${filesystems_map_str}" =~ ^("Mount "|"-------") ]]
-        then
-          continue
-        elif [[ ! "${filesystems_map_str}" =~ ^"/vmfs/volumes/"([a-f0-9-]+)[[:blank:]]+([[:alnum:]_\.\-]*)[[:blank:]]+([a-f0-9-]+)[[:blank:]]+ ]]
-        then
-          skipping \
-            "Cannot parse the filesystems string obtained from hypervisor" \
-            "--> ${filesystems_map_str}"
-          continue 2
-        fi
-
-        filesystem_uuid="${BASH_REMATCH[1]}"
-        filesystem_name="${BASH_REMATCH[2]}"
-
-        if [ -n "${filesystem_name}" ]
-        then
-          if [ "${filesystem_uuid}" != "${BASH_REMATCH[3]}" ]
+      filesystem_id=0
+      filesystem_uuids=()
+      if [    -f "${filesystems_map_filepath}" \
+           -a -s "${filesystems_map_filepath}" ]
+      then
+        while \
+          read -r \
+            -u 5 \
+            filesystems_map_str
+        do
+          if [[ "${filesystems_map_str}" =~ ^("Mount "|"-------") ]]
+          then
+            continue
+          elif [[ ! "${filesystems_map_str}" =~ ^"/vmfs/volumes/"([a-f0-9-]+)[[:blank:]]+([[:alnum:]_\.\-]*)[[:blank:]]+([a-f0-9-]+)[[:blank:]]+ ]]
           then
             skipping \
-              "Different UUID filesystem values in path and separate field" \
+              "Cannot parse the filesystems string obtained from hypervisor" \
               "--> ${filesystems_map_str}"
             continue 2
           fi
 
-          let filesystem_id+=1
-          filesystems_names[${filesystem_id}]="${filesystem_name}"
-          filesystems_uuids[${filesystem_id}]="${filesystem_uuid}"
-        fi
+          filesystem_uuid="${BASH_REMATCH[1]}"
+          filesystem_name="${BASH_REMATCH[2]}"
 
-      done \
-      5<"${filesystems_map_filepath}"
+          if [ -n "${filesystem_name}" ]
+          then
+            if [ "${filesystem_uuid}" != "${BASH_REMATCH[3]}" ]
+            then
+              skipping \
+                "Different UUID filesystem values in path and separate field" \
+                "--> ${filesystems_map_str}"
+              continue 2
+            fi
+
+            let filesystem_id+=1
+            filesystems_names[${filesystem_id}]="${filesystem_name}"
+            filesystems_uuids[${filesystem_id}]="${filesystem_uuid}"
+          fi
+
+        done \
+        5<"${filesystems_map_filepath}"
+      fi
     fi
 
     vms_map_filepath=$(
@@ -1818,6 +1837,8 @@ function parse_ini_file {
 #  Input: ${@}                       - List of options, virtual machines names or hypervisors names
 #         ${my_config_vm_list[@]}    - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]}  - GLOBAL (see description at top)
+#         ${special_command}         - It's a special command if value = 'yes'
+#                                      (special command support 'esxi_name/vm_name' scheme)
 # Modify: ${my_esxi_ids[@]}          - GLOBAL (see description at top)
 #         ${my_esxi_ids_ordered[@]}  - GLOBAL (see description at top)
 #         ${my_vm_ids[@]}            - GLOBAL (see description at top)
@@ -1870,10 +1891,7 @@ function parse_cmd_config_list {
       continue
     fi
 
-    if [    "${command_name}" = "destroy" \
-         -o "${command_name}" = "reboot" \
-         -o "${command_name}" = "start" \
-         -o "${command_name}" = "stop" ]
+    if [ "${special_command}" = "yes" ]
     then
       esxi_name="${arg_name%%/*}"
       if [ "${esxi_name}" != "${arg_name}" ]
@@ -1908,10 +1926,7 @@ function parse_cmd_config_list {
       then
         esxi_id="${my_params[${vm_id}.at]}"
 
-        if [    "${command_name}" = "destroy" \
-             -o "${command_name}" = "reboot" \
-             -o "${command_name}" = "start" \
-             -o "${command_name}" = "stop" ]
+        if [ "${special_command}" = "yes" ]
         then
           append_my_ids \
             "${esxi_id}"
@@ -1925,10 +1940,7 @@ function parse_cmd_config_list {
       fi
     done
 
-    if [    "${command_name}" != "destroy" \
-         -a "${command_name}" != "reboot" \
-         -a "${command_name}" != "start" \
-         -a "${command_name}" != "stop" ]
+    if [ "${special_command}" != "yes" ]
     then
       for esxi_id in "${!my_config_esxi_list[@]}"
       do
@@ -2085,6 +2097,8 @@ function ping_host {
 #         ${ESXI_CONFIG_PATH}        - GLOBAL (see description at top)
 #         ${MY_DEPENDENCIES[@]}      - GLOBAL (see description at top)
 #         ${my_options_desc[@]}      - GLOBAL (see description at top)
+#         ${special_command}         - It's a special command if value = 'yes'
+#                                      (special command support 'esxi_name/vm_name' scheme)
 #         ${supported_my_options[@]} - List of supported options supported by the command
 # Modify: ${my_params[@]}            - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]}  - GLOBAL (see description at top)
@@ -2102,13 +2116,6 @@ function prepare_steps {
   local \
     get_type="${1}"
   shift
-
-  if [    "${get_type}" != "full" \
-       -a "${get_type}" != "simple" ]
-  then
-    internal \
-      "Only 'full' and 'simple' value supported as first parameter"
-  fi
 
   check_dependencies
   parse_ini_file
@@ -2146,10 +2153,7 @@ function prepare_steps {
 
       if [ "${my_options[-n]}" = "yes" ]
       then
-        if [    "${command_name}" = "destroy" \
-             -o "${command_name}" = "reboot" \
-             -o "${command_name}" = "start" \
-             -o "${command_name}" = "stop" ]
+        if [ "${special_command}" = "yes" ]
         then
           info "Will prepare a virtual machines map on ${UNDERLINE}necessary${NORMAL} hypervisors only"
         else
@@ -2172,10 +2176,7 @@ function prepare_steps {
           "${!my_config_esxi_list[@]}"
       fi
 
-      if [    "${command_name}" = "destroy" \
-           -o "${command_name}" = "reboot" \
-           -o "${command_name}" = "start" \
-           -o "${command_name}" = "stop" ]
+      if [ "${special_command}" = "yes" ]
       then
         progress "Parse command line arguments list"
         parse_cmd_real_list "${@}"
@@ -3795,10 +3796,19 @@ function command_destroy {
 
   if [ "${#}" -lt 1 ]
   then
+    if [ "${command_name}" = "status" ]
+    then
+      local \
+        usage_operation="for which status will be requested"
+    else
+      local \
+        usage_operation="which will be ${command_name}ed"
+    fi
+
     show_usage \
-      "Please specify a virtual machine name or names which will be ${command_name}ed" \
+      "Please specify a virtual machine name or names ${usage_operation}" \
       "You can also prefixed a virtual machine name with hypervisor name" \
-      "to ${command_name} a virtual machine that does not exist in the configuration file" \
+      "to ${command_name/status/status request} a virtual machine that does not exist in the configuration file" \
       "" \
       "Usage: ${my_name} ${command_name} [options] <vm_name> [vm_name] [<esxi_name>/<vm_name>] ..."
   fi
@@ -3808,6 +3818,7 @@ function command_destroy {
       [destroy]="destroy"
       [reboot]="power reboot"
       [start]="power on"
+      [status]="status"
       [stop]="power shutdown"
     )
 
@@ -3820,24 +3831,38 @@ function command_destroy {
   # Always scan only necessary hypervisors
   my_options[-n]="yes"
 
-  # We use a 'full' scan type to obtain vmx parameters, from which it will be possible
-  # to understand whether the image is used by other virtual machines and it can be deleted
-  # and also for obtain the ipv4 address for 'reboot' command
-  prepare_steps \
-    "full" \
-    "${@}"
+  local \
+    special_command="yes"
+
+  if [ "${command_name}" = "status" ]
+  then
+    prepare_steps \
+      "very simple" \
+      "${@}"
+  else
+    # We use a 'full' scan type to obtain vmx parameters, from which it will be possible
+    # to understand whether the image is used by other virtual machines and it can be deleted
+    # and also for obtain the ipv4 address for 'reboot' command
+    prepare_steps \
+      "full" \
+      "${@}"
+  fi
 
   local -A \
     params=()
   local \
     attempts=0 \
-    command_status_name="${command_name/stop/stopp}" \
+    command_status_name="${command_name}" \
     processed_vms=0 \
     esxi_id="" \
     esxi_name="" \
     last_vm_id="" \
     vm_id="" \
-    vm_name=""
+    vm_name="" \
+    vm_state=""
+
+  command_status_name="${command_status_name/stop/stopp}"
+  command_status_name="${command_status_name/status/status request}"
 
   for vm_id in "${my_vm_ids_ordered[@]}" hook
   do
@@ -3863,7 +3888,7 @@ function command_destroy {
 
     get_params "${vm_id}|${esxi_id}"
 
-    info "Will ${command_name} a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
+    info "Will ${command_name/status/get status} a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
     if [    "${command_name}" = "reboot" \
          -o "${command_name}" = "start" ]
@@ -3905,8 +3930,17 @@ function command_destroy {
       "${vm_id}" \
     || continue
 
-    if [    "${command_name}" = "reboot" \
-         -o "${command_name}" = "stop" ]
+    if [ "${command_name}" = "status" ]
+    then
+      if [    "${vm_state}" != "Powered on" \
+           -a "${vm_state}" != "Powered off" ]
+      then
+        skipping \
+          "The unknown '${vm_state}' power state of virtual machine"
+        continue
+      fi
+    elif [    "${command_name}" = "reboot" \
+           -o "${command_name}" = "stop" ]
     then
       progress "Waiting for the virtual machine to ${command_name} (ping)"
       let attempts=10
@@ -3933,8 +3967,11 @@ function command_destroy {
     my_vm_ids[${vm_id}]="${COLOR_GREEN}${command_status_name^^}ED${COLOR_NORMAL}"
     let processed_vms+=1
 
-    if [    "${command_name}" = "reboot" \
-         -o "${command_name}" = "start" ]
+    if [ "${command_name}" = "status" ]
+    then
+      my_vm_ids[${vm_id}]+=" (${vm_state})"
+    elif [    "${command_name}" = "reboot" \
+           -o "${command_name}" = "start" ]
     then
       progress "Checking the network availability of the virtual machine (ping)"
       let attempts=10
@@ -3964,7 +4001,7 @@ function command_destroy {
 
   show_processed_status \
     "all" \
-    "\nTotal: %d ${command_name}ed, %d skipped virtual machines\n" \
+    "\nTotal: %d ${command_status_name}ed, %d skipped virtual machines\n" \
     ${processed_vms} \
     $((${#my_vm_ids[@]}-processed_vms))
 
@@ -4409,6 +4446,19 @@ function command_start {
   if [ "${1}" = "description" ]
   then
     echo "Start (power on) virtual machine(s)"
+    return 0
+  fi
+
+  local \
+    supported_my_options=("")
+
+  command_destroy "${@}"
+}
+
+function command_status {
+  if [ "${1}" = "description" ]
+  then
+    echo "Get the power status virtual machine(s)"
     return 0
   fi
 
