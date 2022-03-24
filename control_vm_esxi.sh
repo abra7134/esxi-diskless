@@ -3210,6 +3210,7 @@ function command_create {
     vm_esxi_dir="" \
     vm_esxi_id="" \
     vm_esxi_iso_filepath="" \
+    vm_esxi_marker_filepath="" \
     vm_esxi_vmdk_filepath="" \
     vm_esxi_vmdk_template_filepath="" \
     vm_id="" \
@@ -3431,15 +3432,21 @@ function command_create {
     fi
 
     vm_esxi_dir="/vmfs/volumes/${params[vm_esxi_datastore]}/${vm_name}"
+    vm_esxi_marker_filepath="${vm_esxi_dir}/.safe_to_remove"
     progress "Create a directory for virtual machine on hypervisor (mkdir)"
     run_on_hypervisor \
       "${esxi_id}" \
       "ssh" \
+      "if test -d \"${vm_esxi_dir}\" -a -f \"${vm_esxi_marker_filepath}\"; then rm -r \"${vm_esxi_dir}\"; fi" \
+      "|| Failed to remove the '${vm_esxi_dir}' directory on hypervisor" \
       "! test -d \"${vm_esxi_dir}\"" \
-      "|| The directory '${vm_esxi_dir}' is already exist on hypervisor" \
-      "|| Please remove it manually and try again" \
+      "|| The directory '${vm_esxi_dir}' is already exist on hypervisor," \
+      "|| but the marker file '${vm_esxi_marker_filepath}' is not exist, therefore," \
+      "|| Automated deletion is not safe, please remove it manually and try again" \
       "mkdir \"${vm_esxi_dir}\"" \
       "|| Failed to create a directory '${vm_esxi_dir}' on hypervisor" \
+      "touch \"${vm_esxi_marker_filepath}\"" \
+      "|| Failed to create a marker file '${vm_esxi_marker_filepath}' on hypervisor" \
     || continue
 
     progress "Prepare a virtual machine configuration file .vmx (in ${temp_dir} directory)"
@@ -3609,6 +3616,8 @@ function command_create {
       "ssh" \
       "vim-cmd solo/registervm \"${vm_esxi_dir}/${vm_name}.vmx\" \"${vm_name}\"" \
       "|| Failed to register a virtual machine on hypervisor" \
+      "rm \"${vm_esxi_marker_filepath}\"" \
+      "|| Failed to remove a marker file '${vm_esxi_marker_filepath}' on hypervisor" \
     || continue
 
     remove_cachefile_for \
