@@ -537,7 +537,7 @@ function esxi_vm_simple_command {
   [ "${vm_operation}" = "status" ] \
   && return 0
 
-  progress "${vm_operation^} the virtual machine on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
+  progress "${vm_operation^} the virtual machine (id='${vm_esxi_id}') on '${esxi_name}' hypervisor (vim-cmd vmsvc/${vm_operation// /.})"
 
   if [ "${vm_state}" = "Powered on" ]
   then
@@ -2001,74 +2001,84 @@ function parse_cmd_real_list {
       continue
     fi
 
-    for vm_id in "${!my_config_vm_list[@]}"
+    for vm_id in "${!my_config_vm_list[@]}" not_found
     do
-      if [ "${arg_name%%/*}" = "${arg_name}" ]
+      [ "${vm_id}" = "not_found" ] \
+      && break
+
+      vm_name="${my_config_vm_list[${vm_id}]}"
+
+      if [ "${arg_name#*/}" = "${vm_name}" ]
       then
-        vm_name="${my_config_vm_list[${vm_id}]}"
         esxi_id="${my_params[${vm_id}.at]}"
         esxi_name="${my_config_esxi_list[${esxi_id}]}"
-      else
-        esxi_name="${arg_name%%/*}"
-        arg_name="${arg_name#*/}"
-        vm_name="${arg_name}"
 
-        for esxi_id in "${!my_config_esxi_list[@]}"
-        do
-          [ "${esxi_name}" = "${my_config_esxi_list[${esxi_id}]}" ] \
-          && break
-        done
-      fi
+        [    "${arg_name%%/*}" != "${arg_name}" \
+          -a "${esxi_name}" != "${arg_name%%/*}" ] \
+        && continue
 
-      if [ "${arg_name}" = "${vm_name}" ]
-      then
-        vm_real_id=""
-        for real_vm_id in "${!my_real_vm_list[@]}"
-        do
-          if [    "${my_params[${real_vm_id}.at]}" = "${esxi_id}" \
-               -a "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
-          then
-            if [ -n "${vm_real_id}" ]
-            then
-              vm_id="${vm_real_id}"
-              skipping \
-                "Found multiple virtual machines with the same name on hypervisor" \
-                "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
-                "Please check it manually and rename the one of the virtual machine"
-              continue 3
-            fi
-            vm_real_id="${real_vm_id}"
-            append_my_ids \
-              "${real_vm_id}"
-            # Added for correct processing hooks
-            my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
-          fi
-        done
-
-        # Add a fake virtual machine definiton for correct status processing
-        # if there is a problem with hypervisor or virtual machine not found on hypervisor
-        if [ -z "${vm_real_id}" ]
-        then
-          let my_params_last_id+=1
-          real_vm_id="${my_params_last_id}"
-          my_real_vm_list[${real_vm_id}]="${arg_name}"
-          my_params[${real_vm_id}.at]="${esxi_id}"
-          my_params[${real_vm_id}.vm_esxi_datastore]="???"
-
-          append_my_ids \
-            "${real_vm_id}"
-
-          if [ -z "${my_esxi_ids[${esxi_id}]}" ]
-          then
-            vm_id="${real_vm_id}"
-            skipping \
-              "Not found on hypervisor" \
-              "Available names can be viewed using the '${my_name} show ${esxi_name}' command"
-          fi
-        fi
-        continue 2
+        break
       fi
     done
+
+    if [ "${vm_id}" = "not_found" ]
+    then
+      vm_name="${arg_name#*/}"
+
+      esxi_name="${arg_name%%/*}"
+      for esxi_id in "${!my_config_esxi_list[@]}"
+      do
+        [ "${esxi_name}" = "${my_config_esxi_list[${esxi_id}]}" ] \
+        && break
+      done
+    fi
+
+    vm_real_id=""
+    for real_vm_id in "${!my_real_vm_list[@]}"
+    do
+      if [    "${my_params[${real_vm_id}.at]}" = "${esxi_id}" \
+           -a "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
+      then
+        if [ -n "${vm_real_id}" ]
+        then
+          vm_id="${vm_real_id}"
+          skipping \
+            "Found multiple virtual machines with the same name on hypervisor" \
+            "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+            "Please check it manually and rename the one of the virtual machine"
+          continue 2
+        fi
+
+        append_my_ids \
+          "${real_vm_id}"
+
+        vm_real_id="${real_vm_id}"
+        # Added for correct processing hooks
+        my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
+      fi
+    done
+
+    # Add a fake virtual machine definiton for correct status processing
+    # if there is a problem with hypervisor or virtual machine not found on hypervisor
+    if [ -z "${vm_real_id}" ]
+    then
+      let my_params_last_id+=1
+      real_vm_id="${my_params_last_id}"
+      my_real_vm_list[${real_vm_id}]="${vm_name}"
+      my_params[${real_vm_id}.at]="${esxi_id}"
+
+      if [ "${vm_id}" != "not_found" ]
+      then
+        my_params[${real_vm_id}.vm_esxi_datastore]="${my_params[${vm_id}.vm_esxi_datastore]}"
+        my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
+      else
+        my_params[${real_vm_id}.vm_esxi_datastore]="???"
+        my_params[${real_vm_id}.local_hook_path]=""
+      fi
+
+      append_my_ids \
+        "${real_vm_id}"
+    fi
   done
 
   return 0
@@ -2467,9 +2477,18 @@ function run_hook {
 
   if [ "${hooks_status}" -gt 0 ]
   then
-    my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/ (/${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL} (}"
+    local \
+      hook_status_message="${COLOR_YELLOW}/HOOK FAILED${COLOR_NORMAL}"
   else
-    my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/ (/${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL} (}"
+    local \
+      hook_status_message="${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL}"
+  fi
+
+  if [ "${my_vm_ids[${vm_id}]:(-1)}" = ")" ]
+  then
+    my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/ (/${hook_status_message} (}"
+  else
+    my_vm_ids[${vm_id}]+="${hook_status_message}"
   fi
 
   return 0
@@ -3234,18 +3253,18 @@ function command_create {
 
     # This is only for correct running hook for the last virtual machine
     [ "${vm_id}" = "hook" ] \
-    && continue
+    && break
 
     last_vm_id="${vm_id}"
     vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
+    get_params "${vm_id}|${esxi_id}"
+
     # Skip if we have any error on hypervisor
     [ -n "${my_esxi_ids[${esxi_id}]}" ] \
     && continue
-
-    get_params "${vm_id}|${esxi_id}"
 
     info "Will ${my_options[-f]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
@@ -3882,12 +3901,14 @@ function command_destroy {
 
     # This is only for correct running hook for the last virtual machine
     [ "${vm_id}" = "hook" ] \
-    && continue
+    && break
 
     last_vm_id="${vm_id}"
     vm_name="${my_real_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
+
+    get_params "${vm_id}|${esxi_id}"
 
     # Skip if we have any error on hypervisor or virtual machine
     [ -n "${my_esxi_ids[${esxi_id}]}" ] \
@@ -3895,9 +3916,15 @@ function command_destroy {
     [ -n "${my_vm_ids[${vm_id}]}" ] \
     && continue
 
-    get_params "${vm_id}|${esxi_id}"
+    info "Will ${command_name/status/get status} a '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
-    info "Will ${command_name/status/get status} a '${vm_name}' (id=${params[vm_esxi_id]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
+    if [ -z "${params[vm_esxi_id]}" ]
+    then
+      skipping \
+        "Not found on hypervisor" \
+        "Available names can be viewed using the '${my_name} show ${esxi_name}' command"
+      continue
+    fi
 
     if [    "${command_name}" = "reboot" \
          -o "${command_name}" = "start" ]
@@ -4582,18 +4609,18 @@ function command_update {
 
     # This is only for correct running hook for the last virtual machine
     [ "${vm_id}" = "hook" ] \
-    && continue
+    && break
 
     last_vm_id="${vm_id}"
     vm_name="${my_config_vm_list[${vm_id}]}"
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
+    get_params "${vm_id}|${esxi_id}"
+
     # Skip if we have any error on hypervisor
     [ -n "${my_esxi_ids[${esxi_id}]}" ] \
     && continue
-
-    get_params "${vm_id}|${esxi_id}"
 
     info "Will update a '${update_param}' parameter at '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]})"
 
@@ -4628,7 +4655,7 @@ function command_update {
     if [ -z "${vm_real_id}" ]
     then
       skipping \
-        "The virtual machine not exists on hypervisor"
+        "Not found on hypervisor"
       continue
     elif [ ${#another_esxi_names[@]} -gt 0 ]
     then
