@@ -1768,31 +1768,30 @@ function parse_ini_file {
   # Fill in all missing fields in [esxi_list] and [vm_list] sections from default values with some checks
   for config_parameter in "${!my_params[@]}"
   do
-    if [[ "${config_parameter}" =~ ^0\.(esxi_.*)$ ]]
+    if [ "${config_parameter:0:2}" = "0." ]
     then
-      # Override the parameter name without prefix
-      config_parameter="${BASH_REMATCH[1]}"
+      config_parameter="${config_parameter#0.}"
       default_value="${my_params[0.${config_parameter}]}"
-      for esxi_id in "${!my_config_esxi_list[@]}"
-      do
-        if [ ! -v my_params[${esxi_id}.${config_parameter}] ]
-        then
 
-          if [ "${default_value}" = "REQUIRED" ]
+      if [ "${config_parameter:0:5}" = "esxi_" ]
+      then
+        for esxi_id in "${!my_config_esxi_list[@]}"
+        do
+          if [ ! -v my_params[${esxi_id}.${config_parameter}] ]
           then
-            error \
-              "Problem in configuration file:" \
-              "Is absent the required '${config_parameter}' parameter at '${my_config_esxi_list[${esxi_id}]}' esxi instance definition" \
-              "Please fill the value of parameter and try again"
-          fi
+            if [ "${default_value}" = "REQUIRED" ]
+            then
+              error \
+                "Problem in configuration file:" \
+                "Is absent the required '${config_parameter}' parameter at '${my_config_esxi_list[${esxi_id}]}' esxi instance definition" \
+                "Please fill the value of parameter and try again"
+            fi
 
-          my_params[${esxi_id}.${config_parameter}]="${default_value}"
-        fi
-      done
-    elif [[ "${config_parameter}" =~ ^0\.(.*)$ ]]
-    then
-      # Overriden the parameter name without prefix
-      config_parameter="${BASH_REMATCH[1]}"
+            my_params[${esxi_id}.${config_parameter}]="${default_value}"
+          fi
+        done
+      fi
+
       for vm_id in "${!my_config_vm_list[@]}"
       do
         if [ ! -v my_params[${vm_id}.at] ]
@@ -1806,15 +1805,10 @@ function parse_ini_file {
         esxi_id="${my_params[${vm_id}.at]}"
         if [ ! -v my_params[${vm_id}.${config_parameter}] ]
         then
-
           if [ -v my_params[${esxi_id}.${config_parameter}] ]
           then
             default_value="${my_params[${esxi_id}.${config_parameter}]}"
-          else
-            default_value="${my_params[0.${config_parameter}]}"
-          fi
-
-          if [ "${default_value}" = "REQUIRED" ]
+          elif [ "${default_value}" = "REQUIRED" ]
           then
             error \
               "Problem in configuration file:" \
@@ -2073,7 +2067,12 @@ function parse_cmd_real_list {
         my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
       else
         my_params[${real_vm_id}.vm_esxi_datastore]="???"
-        my_params[${real_vm_id}.local_hook_path]=""
+        if [ -v my_params[${esxi_id}.local_hook_path] ]
+        then
+          my_params[${real_vm_id}.local_hook_path]="${my_params[${esxi_id}.local_hook_path]}"
+        else
+          my_params[${real_vm_id}.local_hook_path]="${my_params[0.local_hook_path]}"
+        fi
       fi
 
       append_my_ids \
@@ -2267,6 +2266,7 @@ function remove_images {
 
   for real_vm_id in "${!my_real_vm_list[@]}"
   do
+    params=()
     get_params "${real_vm_id}"
 
     if [    "${params[status]}" = "destroyed" \
@@ -2507,8 +2507,6 @@ function run_on_hypervisor {
     sshpass_command="${2}"
   shift 2
 
-  local -A \
-    params=()
   local \
     error_codes_descriptions=() \
     error_code_index="" \
@@ -2517,6 +2515,8 @@ function run_on_hypervisor {
     s="" \
     ssh_params=()
 
+  local -A \
+    params=()
   get_params "${esxi_id}"
 
   # Default error code descriptions from sshpass manual page
@@ -2904,6 +2904,7 @@ function upload_images {
 
   for temp_vm_id in "${my_vm_ids_ordered[@]}"
   do
+    params=()
     get_params "${temp_vm_id}"
 
     for image_type in \
@@ -2963,6 +2964,7 @@ function upload_images {
 
   for image_id in "${my_image_ids_ordered[@]}"
   do
+    params=()
     get_params "${image_id}"
 
     esxi_id="${params[esxi_id]}"
@@ -3255,7 +3257,9 @@ function command_create {
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
-    get_params "${vm_id}|${esxi_id}"
+    params=()
+    get_params "${esxi_id}"
+    get_params "${vm_id}"
 
     # Skip if we have any error on hypervisor
     [ -n "${my_esxi_ids[${esxi_id}]}" ] \
@@ -3903,7 +3907,9 @@ function command_destroy {
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
-    get_params "${vm_id}|${esxi_id}"
+    params=()
+    get_params "${esxi_id}"
+    get_params "${vm_id}"
 
     # Skip if we have any error on hypervisor or virtual machine
     [ -n "${my_esxi_ids[${esxi_id}]}" ] \
@@ -4611,7 +4617,9 @@ function command_update {
     esxi_id="${my_params[${vm_id}.at]}"
     esxi_name="${my_config_esxi_list[${esxi_id}]}"
 
-    get_params "${vm_id}|${esxi_id}"
+    params=()
+    get_params "${esxi_id}"
+    get_params "${vm_id}"
 
     # Skip if we have any error on hypervisor
     [ -n "${my_esxi_ids[${esxi_id}]}" ] \

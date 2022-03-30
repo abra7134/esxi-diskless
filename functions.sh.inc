@@ -345,7 +345,6 @@ function get_params {
     regex_id="${1}" \
     param=""
 
-  params=()
   for param in "${!my_params[@]}"
   do
     if [[ "${param}" =~ ^(${regex_id})\.(.*)$ ]]

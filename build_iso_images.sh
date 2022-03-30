@@ -717,6 +717,7 @@ function command_build {
   do
     build_name="${my_builds_list[${build_id}]}"
 
+    params=()
     get_params "${build_id}"
     info "Will build a '${build_name}' image (based on '${params[base_layer]}' base layer)"
 
