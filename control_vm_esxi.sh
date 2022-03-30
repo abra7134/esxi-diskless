@@ -2135,11 +2135,6 @@ function prepare_steps {
     warning \
       "The [esxi_list] is empty in configuration file" \
       "Please fill a configuration file and try again"
-  elif [ ${#my_config_vm_list[@]} -lt 1 ]
-  then
-    warning \
-      "The [vm_list] is empty in configuration file" \
-      "Please fill a configuration file and try again"
   fi
 
   progress "Parse command line arguments list"

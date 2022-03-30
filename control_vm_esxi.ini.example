@@ -1,7 +1,7 @@
 # Main configuration file with list and options for all ESXi and VM instances
 # format is very similar to INI with slight differences
 #
-# The entire configuration file consists of 3 sections: [defaults], [esxi_list], [vm_list]
+# The entire configuration file consists of 3 sections: [defaults], [esxi_list], [vm_list] (optional)
 #
 # The [defaults] section sets default values that can be overridden for specific ESXi instances or virtual machines
 # The remaining two sections specify the lists of ESXi instances and virtual machines on them and their parameters
@@ -59,4 +59,5 @@
 
 [esxi_list]
 
+# The [vm_list] section is optional
 [vm_list]
