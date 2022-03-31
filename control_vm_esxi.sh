@@ -2480,6 +2480,13 @@ function run_hook {
       hook_status_message="${COLOR_GREEN}/HOOK RUNNED${COLOR_NORMAL}"
   fi
 
+  if [ -z "${my_vm_ids[${vm_id}]}" ]
+  then
+    local \
+      esxi_id="${params[at]}"
+    my_vm_ids[${vm_id}]="${my_esxi_ids[${esxi_id}]}"
+  fi
+
   if [ "${my_vm_ids[${vm_id}]:(-1)}" = ")" ]
   then
     my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/ (/${hook_status_message} (}"
