@@ -649,8 +649,8 @@ function esxi_vm_simple_command {
       || [ "${vm_operation}" = "power off"      -a "${vm_state}" = "Powered off" ] \
       || [ "${vm_operation}" = "power shutdown" -a "${vm_state}" = "Powered off" ]
     do
-      echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
       let attempts--
+      echo "    The virtual machine is still in state '${vm_state}', wait another 5 seconds (${attempts} attempts left)"
       sleep 5
     done
 
@@ -3727,8 +3727,8 @@ function command_create {
       [ "${attempts}" -lt 1 ] \
       || ping_host "${params[vm_ipv4_address]}"
     do
-      echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
       let attempts--
+      echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
       sleep 5
     done
 
@@ -3948,8 +3948,8 @@ function command_destroy {
         [ "${attempts}" -lt 1 ] \
         || ping_host "${params[guestinfo.ipv4_address]}"
       do
-        echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
         let attempts--
+        echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
         sleep 5
       done
 
@@ -3986,8 +3986,8 @@ function command_destroy {
         [ "${attempts}" -lt 1 ] \
         || ! ping_host "${params[guestinfo.ipv4_address]}"
       do
-        echo "    Virtual machine is still alive, wait another 5 seconds (${attempts} attempts left)"
         let attempts--
+        echo "    Virtual machine is still alive, wait another 5 seconds (${attempts} attempts left)"
         sleep 5
       done
 
@@ -4017,8 +4017,8 @@ function command_destroy {
         [ "${attempts}" -lt 1 ] \
         || ping_host "${params[guestinfo.ipv4_address]}"
       do
-        echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
         let attempts--
+        echo "    No connectivity to virtual machine, wait another 5 seconds (${attempts} attempts left)"
         sleep 5
       done
 
