@@ -1790,35 +1790,35 @@ function parse_ini_file {
             my_params[${esxi_id}.${config_parameter}]="${default_value}"
           fi
         done
-      fi
-
-      for vm_id in "${!my_config_vm_list[@]}"
-      do
-        if [ ! -v my_params[${vm_id}.at] ]
-        then
-          error \
-            "Problem in configuration file:" \
-            "The virtual machine '${my_config_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
-            "Please add the 'at' definition and try again"
-        fi
-
-        esxi_id="${my_params[${vm_id}.at]}"
-        if [ ! -v my_params[${vm_id}.${config_parameter}] ]
-        then
-          if [ -v my_params[${esxi_id}.${config_parameter}] ]
-          then
-            default_value="${my_params[${esxi_id}.${config_parameter}]}"
-          elif [ "${default_value}" = "REQUIRED" ]
+      else
+        for vm_id in "${!my_config_vm_list[@]}"
+        do
+          if [ ! -v my_params[${vm_id}.at] ]
           then
             error \
               "Problem in configuration file:" \
-              "Is absent the required '${config_parameter}' parameter at '${my_config_vm_list[$vm_id]}' virtual machine definition" \
-              "Please fill the value of parameter and try again"
+              "The virtual machine '${my_config_vm_list[${vm_id}]}' has not 'at' parameter definiton" \
+              "Please add the 'at' definition and try again"
           fi
 
-          my_params[${vm_id}.${config_parameter}]="${default_value}"
-        fi
-      done
+          esxi_id="${my_params[${vm_id}.at]}"
+          if [ ! -v my_params[${vm_id}.${config_parameter}] ]
+          then
+            if [ -v my_params[${esxi_id}.${config_parameter}] ]
+            then
+              default_value="${my_params[${esxi_id}.${config_parameter}]}"
+            elif [ "${default_value}" = "REQUIRED" ]
+            then
+              error \
+                "Problem in configuration file:" \
+                "Is absent the required '${config_parameter}' parameter at '${my_config_vm_list[$vm_id]}' virtual machine definition" \
+                "Please fill the value of parameter and try again"
+            fi
+
+            my_params[${vm_id}.${config_parameter}]="${default_value}"
+          fi
+        done
+      fi
     fi
   done
 
@@ -2027,34 +2027,32 @@ function parse_cmd_real_list {
       done
     fi
 
-    vm_real_id=""
-    for real_vm_id in "${!my_real_vm_list[@]}"
+    real_vm_id=""
+    for vm_real_id in "${!my_real_vm_list[@]}"
     do
-      if [    "${my_params[${real_vm_id}.at]}" = "${esxi_id}" \
-           -a "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
+      if [    "${my_params[${vm_real_id}.at]}" = "${esxi_id}" \
+           -a "${my_real_vm_list[${vm_real_id}]}" = "${vm_name}" ]
       then
-        if [ -n "${vm_real_id}" ]
+        if [ -n "${real_vm_id}" ]
         then
-          vm_id="${vm_real_id}"
+          vm_id="${real_vm_id}"
           skipping \
             "Found multiple virtual machines with the same name on hypervisor" \
-            "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+            "with '${my_params[${real_vm_id}.vm_esxi_id]}' and '${my_params[${vm_real_id}.vm_esxi_id]}' identifiers on hypervisor" \
             "Please check it manually and rename the one of the virtual machine"
           continue 2
         fi
 
         append_my_ids \
-          "${real_vm_id}"
+          "${vm_real_id}"
 
-        vm_real_id="${real_vm_id}"
-        # Added for correct processing hooks
-        my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
+        real_vm_id="${vm_real_id}"
       fi
     done
 
     # Add a fake virtual machine definiton for correct status processing
     # if there is a problem with hypervisor or virtual machine not found on hypervisor
-    if [ -z "${vm_real_id}" ]
+    if [ -z "${real_vm_id}" ]
     then
       let my_params_last_id+=1
       real_vm_id="${my_params_last_id}"
@@ -2064,19 +2062,22 @@ function parse_cmd_real_list {
       if [ "${vm_id}" != "not_found" ]
       then
         my_params[${real_vm_id}.vm_esxi_datastore]="${my_params[${vm_id}.vm_esxi_datastore]}"
-        my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
       else
         my_params[${real_vm_id}.vm_esxi_datastore]="???"
-        if [ -v my_params[${esxi_id}.local_hook_path] ]
-        then
-          my_params[${real_vm_id}.local_hook_path]="${my_params[${esxi_id}.local_hook_path]}"
-        else
-          my_params[${real_vm_id}.local_hook_path]="${my_params[0.local_hook_path]}"
-        fi
       fi
 
       append_my_ids \
         "${real_vm_id}"
+    fi
+
+    if [ -v my_params[${vm_id}.local_hook_path] ]
+    then
+      my_params[${real_vm_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
+    elif [ -v my_params[${esxi_id}.local_hook_path] ]
+    then
+      my_params[${real_vm_id}.local_hook_path]="${my_params[${esxi_id}.local_hook_path]}"
+    else
+      my_params[${real_vm_id}.local_hook_path]="${my_params[0.local_hook_path]}"
     fi
   done
 
