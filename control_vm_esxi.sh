@@ -3803,6 +3803,14 @@ function command_create {
     fi
   done
 
+  if [ "${vm_id}" != "hook" ]
+  then
+    run_hook \
+      "${last_vm_id}" \
+      "${vm_name}" \
+      "${esxi_name}"
+  fi
+
   remove_images \
     any
 
@@ -4037,6 +4045,14 @@ function command_destroy {
       fi
     fi
   done
+
+  if [ "${vm_id}" != "hook" ]
+  then
+    run_hook \
+      "${last_vm_id}" \
+      "${vm_name}" \
+      "${esxi_name}"
+  fi
 
   if [ "${command_name}" = "destroy" ]
   then
@@ -4849,6 +4865,14 @@ function command_update {
     my_params[${vm_real_id}.status]="image updated"
     let updated_vms+=1
   done
+
+  if [ "${vm_id}" != "hook" ]
+  then
+    run_hook \
+      "${last_vm_id}" \
+      "${vm_name}" \
+      "${esxi_name}"
+  fi
 
   if [ "${update_param}" = "local_iso_path" ]
   then
