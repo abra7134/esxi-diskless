@@ -2374,31 +2374,42 @@ function remove_images {
 
 # Function to run hook script and update the status of virtual machine
 #
-# Input:  ${1}             - The virtual machine identifier at ${my_config_vm_list[@]} array
-#         ${2}             - The name of virtual machine for which the hook is called
-#         ${3}             - The hypervisor name on which the virtual machine is serviced
-#         ${command_name}  - The name of runned command
-#         ${params[@]}     - The associative array with virtual machine and hypervisor parameters
-# Modify: ${my_vm_ids[@]}  - GLOBAL (see description at top)
-# Output: >&1              - The stdout from hook script
-# Return: 0                - Always
+# Input:  ${1}                        - The virtual machine identifier at ${my_config_vm_list[@]} array
+#         ${2}                        - The name of virtual machine for which the hook is called
+#         ${3}                        - The operation type
+#         ${command_name}             - The name of runned command
+#         ${my_config_esxi_list[@]}   - GLOBAL (see description at top)
+#         ${my_params[@]}             - GLOBAL (see description at top)
+# Modify: ${my_vm_ids[@]}             - GLOBAL (see description at top)
+# Output: >&1                         - The stdout from hook script
+# Return: 0                           - Always
 #
 function run_hook {
   local \
     vm_id="${1}" \
     vm_name="${2}" \
-    esxi_name="${3}"
+    hook_type="${3:-${command_name}}"
 
-  [ -z "${params[local_hook_path]}" ] \
+  [ -z "${my_params[${vm_id}.local_hook_path]}" ] \
   && return 0
 
   local \
-    hook_path="${params[local_hook_path]}" \
-    hook_type="${command_name}" \
+    config_param="" \
+    esxi_id="${my_params[${vm_id}.at]}" \
+    hook_path="${my_params[${vm_id}.local_hook_path]}" \
     hooks_list="" \
     hooks_status=0 \
     vm_status="${my_vm_ids[${vm_id}]}" \
-    vm_status_description=""
+    vm_status_description="" \
+    vmx_param=""
+  local \
+    esxi_name="${my_config_esxi_list[${esxi_id}]}" \
+    exported_params=(
+      vm_ipv4_address
+      vm_ssh_password
+      vm_ssh_port
+      vm_ssh_username
+    )
 
   # Transformating the 'vm_status' value to 'vm_status' and 'vm_status_description'
   #
@@ -2432,15 +2443,28 @@ function run_hook {
   else
     export \
       ESXI_NAME="${esxi_name}" \
-      ESXI_HOSTNAME="${params[esxi_hostname]}" \
+      ESXI_HOSTNAME="${my_params[${esxi_id}.esxi_hostname]}" \
       STATUS="${vm_status}" \
       STATUS_DESCRIPTION="${vm_status_description}" \
       TYPE="${hook_type}" \
-      VM_IPV4_ADDRESS="${params[vm_ipv4_address]}" \
-      VM_SSH_PASSWORD="${params[vm_ssh_password]}" \
-      VM_SSH_PORT="${params[vm_ssh_port]}" \
-      VM_SSH_USERNAME="${params[vm_ssh_username]}" \
       VM_NAME="${vm_name}"
+
+    for vmx_param in "${!my_params_map[@]}"
+    do
+      config_param="${my_params_map[${vmx_param}]}"
+      if \
+        finded_duplicate \
+        "${config_param}" \
+        "${exported_params[@]}"
+      then
+        if [ -v my_params[${vm_id}.${vmx_param}] ]
+        then
+          export "${config_param^^}"="${my_params[${vm_id}.${vmx_param}]}"
+        else
+          export "${config_param^^}"="${my_params[${vm_id}.${config_param}]}"
+        fi
+      fi
+    done
 
     while \
       read f
@@ -2464,11 +2488,12 @@ function run_hook {
       STATUS \
       STATUS_DESCRIPTION \
       TYPE \
-      VM_IPV4_ADDRESS \
-      VM_SSH_PASSWORD \
-      VM_SSH_PORT \
-      VM_SSH_USERNAME \
       VM_NAME
+
+    for config_param in "${exported_params[@]}"
+    do
+      export -n "${config_param^^}"
+    done
   fi
 
   if [ "${hooks_status}" -gt 0 ]
@@ -2482,8 +2507,6 @@ function run_hook {
 
   if [ -z "${my_vm_ids[${vm_id}]}" ]
   then
-    local \
-      esxi_id="${params[at]}"
     my_vm_ids[${vm_id}]="${my_esxi_ids[${esxi_id}]}"
   fi
 
@@ -3230,6 +3253,7 @@ function command_create {
     last_vm_id="" \
     param="" \
     real_vm_id="" \
+    saved_status="" \
     temp_file="" \
     vm_esxi_dir="" \
     vm_esxi_id="" \
@@ -3251,10 +3275,17 @@ function command_create {
 
   for vm_id in "${my_vm_ids_ordered[@]}" hook
   do
+    if [ -v my_vm_ids[${another_vm_real_id}] ]
+    then
+      run_hook \
+        "${another_vm_real_id}" \
+        "${vm_name}" \
+        "destroy"
+    fi
+
     run_hook \
       "${last_vm_id}" \
-      "${vm_name}" \
-      "${esxi_name}"
+      "${vm_name}"
 
     # This is only for correct running hook for the last virtual machine
     [ "${vm_id}" = "hook" ] \
@@ -3703,10 +3734,34 @@ function command_create {
 
     if [ -n "${another_vm_real_id}" ]
     then
-      esxi_vm_simple_command \
-        "power shutdown" \
-        "${another_vm_real_id}" \
-      || continue
+      # Add registration for correct status processing
+      append_my_ids \
+        "${another_vm_real_id}"
+      my_params[${another_vm_real_id}.local_hook_path]="${my_params[${vm_id}.local_hook_path]}"
+
+      if ! \
+        esxi_vm_simple_command \
+          "power shutdown" \
+          "${another_vm_real_id}"
+      then
+        my_vm_ids[${another_vm_real_id}]="${my_vm_ids[${vm_id}]}"
+        my_vm_ids[${vm_id}]=""
+
+        if ! \
+          esxi_vm_simple_command \
+            "destroy" \
+            "${vm_real_id}"
+        then
+          my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/SKIPPED VM/ABORTED}"
+          break
+        fi
+
+        skipping \
+          "Failed to shutdown virtual machine on previous place, see details near"
+        continue
+      fi
+
+      my_vm_ids[${another_vm_real_id}]="${COLOR_YELLOW}STOPPED${COLOR_NORMAL}"
     fi
 
     if ! \
@@ -3716,15 +3771,32 @@ function command_create {
     then
       if [ -n "${another_vm_real_id}" ]
       then
+        saved_status="${my_vm_ids[${vm_id}]}"
+        my_vm_ids[${vm_id}]=""
+
         if ! \
           esxi_vm_simple_command \
             "power on" \
             "${another_vm_real_id}"
         then
-          my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see details above)"
+          my_vm_ids[${another_vm_real_id}]="${my_vm_ids[${vm_id}]/SKIPPED VM/ABORTED}"
+          my_vm_ids[${vm_id}]="${saved_status}"
           break
         fi
+
+        my_vm_ids[${another_vm_real_id}]="${COLOR_YELLOW}REBOOTED${COLOR_NORMAL}"
+        my_vm_ids[${vm_id}]="${saved_status}"
       fi
+
+      if ! \
+        esxi_vm_simple_command \
+          "destroy" \
+          "${vm_real_id}"
+      then
+        my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/SKIPPED VM/ABORTED}"
+        break
+      fi
+
       continue
     fi
 
@@ -3741,31 +3813,32 @@ function command_create {
 
     if [ "${attempts}" -lt 1 ]
     then
-      skipping \
-        "No connectivity to virtual machine" \
-        "Please verify that the virtual machine is up manually"
-
       if [ -n "${another_vm_real_id}" ]
       then
-        if ! \
-          esxi_vm_simple_command \
-            "power shutdown" \
-            "${vm_real_id}"
-        then
-          my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to shutdown virtual machine, see details above)"
-          break
-        fi
+        my_vm_ids[${vm_id}]=""
 
         if ! \
           esxi_vm_simple_command \
             "power on" \
             "${another_vm_real_id}"
         then
-          my_vm_ids[${vm_id}]="${COLOR_RED}ABORTED${COLOR_NORMAL} (Failed to power on virtual machine on previous place, see deatils above)"
+          my_vm_ids[${another_vm_real_id}]="${my_vm_ids[${vm_id}]/SKIPPED VM/ABORTED}"
+          my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED${COLOR_YELLOW}/NO PINGING${COLOR_NORMAL}"
+          break
+        fi
+        my_vm_ids[${another_vm_real_id}]="${COLOR_YELLOW}REBOOTED${COLOR_NORMAL}"
+
+        if ! \
+          esxi_vm_simple_command \
+            "destroy" \
+            "${vm_real_id}"
+        then
+          my_vm_ids[${vm_id}]="${my_vm_ids[${vm_id}]/SKIPPED VM/ABORTED}"
           break
         fi
 
-        my_vm_ids[${vm_id}]="${COLOR_YELLOW}REGISTERED/OLD REVERTED${COLOR_NORMAL} (See details above)"
+        skipping \
+          "No connectivity to virtual machine"
       else
         my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED${COLOR_YELLOW}/NO PINGING${COLOR_NORMAL}"
       fi
@@ -3781,16 +3854,21 @@ function command_create {
 
     if [ -n "${another_vm_real_id}" ]
     then
+      saved_status="${my_vm_ids[${vm_id}]}"
+      my_vm_ids[${vm_id}]=""
+
       if ! \
         esxi_vm_simple_command \
           "destroy" \
           "${another_vm_real_id}"
       then
-        my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/NOT OLD DESTROYED${COLOR_NORMAL} (See details above)"
+        my_vm_ids[${another_vm_real_id}]="${my_vm_ids[${vm_id}]}"
+        my_vm_ids[${vm_id}]="${saved_status}"
         continue
-      else
-        my_vm_ids[${vm_id}]+="${COLOR_GREEN}/OLD DESTROYED${COLOR_NORMAL} (Destroyed on '${my_config_esxi_list[${another_esxi_id}]}' hypervisor)"
       fi
+
+      my_vm_ids[${another_vm_real_id}]="${COLOR_GREEN}DESTROYED${COLOR_NORMAL}"
+      my_vm_ids[${vm_id}]="${saved_status}"
     fi
 
     if [ -n "${params[local_iso_path]}" \
@@ -3805,10 +3883,17 @@ function command_create {
 
   if [ "${vm_id}" != "hook" ]
   then
+    if [ -v my_vm_ids[${another_vm_real_id}] ]
+    then
+      run_hook \
+        "${another_vm_real_id}" \
+        "${vm_name}" \
+        "destroy"
+    fi
+
     run_hook \
       "${last_vm_id}" \
-      "${vm_name}" \
-      "${esxi_name}"
+      "${vm_name}"
   fi
 
   remove_images \
@@ -3911,8 +3996,7 @@ function command_destroy {
   do
     run_hook \
       "${last_vm_id}" \
-      "${vm_name}" \
-      "${esxi_name}"
+      "${vm_name}"
 
     # This is only for correct running hook for the last virtual machine
     [ "${vm_id}" = "hook" ] \
@@ -4050,8 +4134,7 @@ function command_destroy {
   then
     run_hook \
       "${last_vm_id}" \
-      "${vm_name}" \
-      "${esxi_name}"
+      "${vm_name}"
   fi
 
   if [ "${command_name}" = "destroy" ]
@@ -4629,8 +4712,7 @@ function command_update {
   do
     run_hook \
       "${last_vm_id}" \
-      "${vm_name}" \
-      "${esxi_name}"
+      "${vm_name}"
 
     # This is only for correct running hook for the last virtual machine
     [ "${vm_id}" = "hook" ] \
@@ -4870,8 +4952,7 @@ function command_update {
   then
     run_hook \
       "${last_vm_id}" \
-      "${vm_name}" \
-      "${esxi_name}"
+      "${vm_name}"
   fi
 
   if [ "${update_param}" = "local_iso_path" ]
