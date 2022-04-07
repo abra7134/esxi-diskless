@@ -3237,6 +3237,7 @@ function command_create {
     vmx_params=()
   local \
     attempts=0 \
+    destroyed_or_rebooted_vms=0 \
     no_pinging_vms=0 \
     runned_vms=0
   local \
@@ -3786,6 +3787,7 @@ function command_create {
 
         my_vm_ids[${another_vm_real_id}]="${COLOR_YELLOW}REBOOTED${COLOR_NORMAL}"
         my_vm_ids[${vm_id}]="${saved_status}"
+        let destroyed_or_rebooted_vms+=1
       fi
 
       if ! \
@@ -3827,6 +3829,7 @@ function command_create {
           break
         fi
         my_vm_ids[${another_vm_real_id}]="${COLOR_YELLOW}REBOOTED${COLOR_NORMAL}"
+        let destroyed_or_rebooted_vms+=1
 
         if ! \
           esxi_vm_simple_command \
@@ -3869,6 +3872,7 @@ function command_create {
 
       my_vm_ids[${another_vm_real_id}]="${COLOR_GREEN}DESTROYED${COLOR_NORMAL}"
       my_vm_ids[${vm_id}]="${saved_status}"
+      let destroyed_or_rebooted_vms+=1
     fi
 
     if [ -n "${params[local_iso_path]}" \
@@ -3901,10 +3905,11 @@ function command_create {
 
   show_processed_status \
     "all" \
-    "\nTotal: %d created, %d created but no pinging, %d skipped virtual machines\n" \
+    "\nTotal: %d created, %d created but no pinging, %d destroyed or rebooted, %d skipped virtual machines\n" \
     ${runned_vms} \
     ${no_pinging_vms} \
-    $((${#my_vm_ids[@]}-runned_vms-no_pinging_vms))
+    ${destroyed_or_rebooted_vms} \
+    $((${#my_vm_ids[@]}-runned_vms-no_pinging_vms-destroyed_or_rebooted_vms))
 
   exit 0
 }
