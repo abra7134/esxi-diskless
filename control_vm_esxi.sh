@@ -2372,6 +2372,30 @@ function remove_images {
   return 0
 }
 
+# Function to run 'govc' command
+#
+# Input:  ${1}          - The 'govc' command
+#         ${@}          - The additional options
+#         ${params[@]}  - The array with parameters
+# Output: >&1           - The stdout from 'govc' command
+#         >&2           - The stderr from 'govc' command
+# Return:               - The error code from 'govc' command
+#
+function run_govc {
+  local \
+    govc_command="${1}"
+  shift
+
+  GOVC_USERNAME="${params[esxi_ssh_username]}" \
+  GOVC_PASSWORD="${params[esxi_ssh_password]}" \
+  govc \
+    "${govc_command}" \
+    -dc=ha-datacenter \
+    -k=true \
+    -u="https://${params[esxi_hostname]}" \
+    "${@}"
+}
+
 # Function to run hook script and update the status of virtual machine
 #
 # Input:  ${1}                        - The virtual machine identifier at ${my_config_vm_list[@]} array
@@ -4815,14 +4839,9 @@ function command_update {
 
       progress "Getting the identifier of virtual CD-ROM (govc device.ls cdrom-*)"
       if ! \
-        GOVC_USERNAME="${params[esxi_ssh_username]}" \
-        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-        govc \
+        run_govc \
         >"${cdrom_id_file}" \
           device.ls \
-          -dc=ha-datacenter \
-          -k=true \
-          -u="https://${params[esxi_hostname]}" \
           -vm="${vm_name}" \
           'cdrom-*'
       then
@@ -4851,14 +4870,9 @@ function command_update {
       then
         progress "Eject the ISO-image from virtual machine's CD-ROM (govc guest.run -l nobody)"
         if ! \
-          GOVC_USERNAME="${params[esxi_ssh_username]}" \
-          GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-          govc \
+          run_govc \
             guest.run \
-            -dc=ha-datacenter \
-            -k=true \
             -l=nobody \
-            -u="https://${params[esxi_hostname]}" \
             -vm="${vm_name}" \
             /usr/bin/eject --manualeject off /dev/cdrom \
             \&\& \
@@ -4875,15 +4889,10 @@ function command_update {
 
       progress "Update the '${update_param}' parameter (govc device.cdrom.insert)"
       if ! \
-        GOVC_USERNAME="${params[esxi_ssh_username]}" \
-        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-        govc \
+        run_govc \
           device.cdrom.insert \
-          -dc=ha-datacenter \
           -ds="${params[vm_esxi_datastore]}" \
           -device="${cdrom_id}" \
-          -k=true \
-          -u="https://${params[esxi_hostname]}" \
           -vm="${vm_name}" \
           "${params[local_iso_path]:+.iso/}${params[local_iso_path]##*/}"
       then
@@ -4896,13 +4905,8 @@ function command_update {
       then
         progress "Connect the ISO-image to CDROM (govc device.connect)"
         if ! \
-          GOVC_USERNAME="${params[esxi_ssh_username]}" \
-          GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-          govc \
+          run_govc \
             device.connect \
-            -dc=ha-datacenter \
-            -k=true \
-            -u="https://${params[esxi_hostname]}" \
             -vm="${vm_name}" \
             "${cdrom_id}"
         then
@@ -4914,14 +4918,9 @@ function command_update {
     else
       progress "Update the '${update_param}' parameter (govc vm.change)"
       if ! \
-        GOVC_USERNAME="${params[esxi_ssh_username]}" \
-        GOVC_PASSWORD="${params[esxi_ssh_password]}" \
-        govc \
+        run_govc \
           vm.change \
-          -dc=ha-datacenter \
           -e="${update_param_mapped}=${params[${update_param}]}" \
-          -k=true \
-          -u="https://${params[esxi_hostname]}" \
           -vm="${vm_name}"
       then
         skipping \
