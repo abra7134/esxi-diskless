@@ -3842,18 +3842,26 @@ function command_create {
 
         skipping \
           "No connectivity to virtual machine"
-      else
-        my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED${COLOR_YELLOW}/NO PINGING${COLOR_NORMAL}"
+        continue
       fi
 
+      my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED${COLOR_YELLOW}/NO PINGING${COLOR_NORMAL}"
       let no_pinging_vms+=1
-      continue
+    else
+      echo "    The virtual machine is alive, continue"
+
+      my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED/PINGED${COLOR_NORMAL}"
+      let runned_vms+=1
     fi
 
-    echo "    The virtual machine is alive, continue"
-
-    my_vm_ids[${vm_id}]="${COLOR_GREEN}${vm_recreated:+RE}CREATED/PINGED${COLOR_NORMAL}"
-    let runned_vms+=1
+    if [ -n "${params[local_iso_path]}" \
+         -o -n "${params[local_vmdk_path]}" ]
+    then
+      my_vm_ids[${vm_id}]+=" (Runned "
+      my_vm_ids[${vm_id}]+="${params[local_iso_path]:+on '${params[local_iso_path]}'}"
+      my_vm_ids[${vm_id}]+="${params[local_vmdk_path]:+${params[local_iso_path]:+ and }with HDD from '${params[local_vmdk_path]}'}"
+      my_vm_ids[${vm_id}]+=")"
+    fi
 
     if [ -n "${another_vm_real_id}" ]
     then
@@ -3873,15 +3881,6 @@ function command_create {
       my_vm_ids[${another_vm_real_id}]="${COLOR_GREEN}DESTROYED${COLOR_NORMAL}"
       my_vm_ids[${vm_id}]="${saved_status}"
       let destroyed_or_rebooted_vms+=1
-    fi
-
-    if [ -n "${params[local_iso_path]}" \
-         -o -n "${params[local_vmdk_path]}" ]
-    then
-      my_vm_ids[${vm_id}]+=" (Runned "
-      my_vm_ids[${vm_id}]+="${params[local_iso_path]:+on '${params[local_iso_path]}'}"
-      my_vm_ids[${vm_id}]+="${params[local_vmdk_path]:+${params[local_iso_path]:+ and }with HDD from '${params[local_vmdk_path]}'}"
-      my_vm_ids[${vm_id}]+=")"
     fi
   done
 
