@@ -413,9 +413,9 @@ function check_vm_params {
 #
 # Input:  ${1}                      - The virtual machine operation: 'destroy', 'power on', 'power off', 'power reboot', 'power reset', 'power shutdown' or 'status'
 #         ${2}                      - The virtual machine identifier at ${my_real_vm_list[@]} array
-#         ${temp_dir}               - The temporary directory to save commands outputs
 #         ${my_params[@]}           - GLOBAL (see description at top)
 #         ${my_config_esxi_list[@]} - GLOBAL (see description at top)
+#         ${temp_dir}               - The temporary directory to save commands outputs
 # Modify: ${vm_state}               - The state of virtual machine
 # Return: 0                         - If simple operation is successful
 #         another                   - In other cases
@@ -668,6 +668,55 @@ function esxi_vm_simple_command {
   fi
 
   echo "    The virtual machine is ${vm_operation}'ed, continue"
+
+  return 0
+}
+
+# Function to prepare the esxi list where the virtual machine is located
+#
+# Input:  ${esxi_id}                - The hypervisor identifier on which the virtual machine is located
+#         ${my_real_vm_list[@]}     - GLOBAL (see description at top)
+#         ${vm_name}                - The virtual machine name for which the esxi list is prepared
+# Modify: ${another_esxi_id}        - The hypervisor identifier where else a virtual machine was found
+#         ${another_esxi_names[@]}  - The array with hypervisors names where else a virtual machine was found
+#         ${another_vm_real_id}     - The virtual machine identifier at ${my_real_vm_list[@]} array which was found on another hypervisor
+#         ${my_params[@]}           - GLOBAL (see description at top)
+#         ${vm_real_id}             - The virtual machine identifier at ${my_real_vm_list[@]} array which was found on current hypervisor
+# Return: 0                         - Prepare the esxi list is successful
+#         another                   - Found multiple virtual machines with the same name on hypervisor
+#
+function get_another_esxi_names {
+  vm_real_id=""
+  another_esxi_id=""
+  another_esxi_names=()
+  another_vm_real_id=""
+
+  local \
+    real_vm_id=""
+  for real_vm_id in "${!my_real_vm_list[@]}"
+  do
+    if [ "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
+    then
+      if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
+      then
+        if [ -n "${vm_real_id}" ]
+        then
+          skipping \
+            "Found multiple virtual machines with the same name on hypervisor" \
+            "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
+            "Please check it manually and rename the one of the virtual machine"
+          return 1
+        fi
+        vm_real_id="${real_vm_id}"
+      else
+        another_esxi_id="${my_params[${real_vm_id}.at]}"
+        another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_params[${another_esxi_id}.esxi_hostname]})"
+        another_vm_real_id="${real_vm_id}"
+      fi
+    fi
+  done
+
+  my_params[${vm_real_id}.vm_id]="${vm_id}"
 
   return 0
 }
@@ -3277,7 +3326,6 @@ function command_create {
     image_id="" \
     last_vm_id="" \
     param="" \
-    real_vm_id="" \
     saved_status="" \
     temp_file="" \
     vm_esxi_dir="" \
@@ -3331,34 +3379,8 @@ function command_create {
 
     info "Will ${my_options[-f]:+force }create a '${vm_name}' (${params[vm_ipv4_address]}) virtual machine on '${esxi_name}' (${params[esxi_hostname]}) hypervisor"
 
-    vm_real_id=""
-    another_esxi_names=()
-    another_vm_real_id=""
-    # Preparing the esxi list where the virtual machine is located
-    for real_vm_id in "${!my_real_vm_list[@]}"
-    do
-      if [ "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
-      then
-        if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
-        then
-          if [ -n "${vm_real_id}" ]
-          then
-            skipping \
-              "Found multiple virtual machines with the same name on hypervisor" \
-              "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
-              "Please check it manually and rename the one of the virtual machine"
-            continue 2
-          fi
-          vm_real_id="${real_vm_id}"
-        else
-          another_esxi_id="${my_params[${real_vm_id}.at]}"
-          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_params[${another_esxi_id}.esxi_hostname]})"
-          another_vm_real_id="${real_vm_id}"
-        fi
-      fi
-    done
-
-    my_params[${vm_real_id}.vm_id]="${vm_id}"
+    get_another_esxi_names \
+    || continue
 
     # Checking existance the virtual machine on another or this hypervisors
     if [ -n "${vm_real_id}" \
@@ -4720,6 +4742,7 @@ function command_update {
     params=()
   local \
     another_esxi_id="" \
+    another_vm_real_id="" \
     cdrom_id="" \
     cdrom_id_file="${temp_dir}/cdrom_id" \
     cdrom_type="" \
@@ -4727,7 +4750,6 @@ function command_update {
     esxi_id="" \
     esxi_name="" \
     last_vm_id="" \
-    real_vm_id="" \
     vm_esxi_vmx_filepath="" \
     vm_id="" \
     vm_name="" \
@@ -4761,32 +4783,8 @@ function command_update {
 
     info "Will update a '${update_param}' parameter at '${vm_name}' virtual machine on '${esxi_name}' (${params[esxi_hostname]})"
 
-    vm_real_id=""
-    another_esxi_names=()
-    # Preparing the esxi list where the virtual machine is located
-    for real_vm_id in "${!my_real_vm_list[@]}"
-    do
-      if [ "${my_real_vm_list[${real_vm_id}]}" = "${vm_name}" ]
-      then
-        if [ "${my_params[${real_vm_id}.at]}" = "${esxi_id}" ]
-        then
-          if [ -n "${vm_real_id}" ]
-          then
-            skipping \
-              "Found multiple virtual machines with the same name on hypervisor" \
-              "with '${my_params[${vm_real_id}.vm_esxi_id]}' and '${my_params[${real_vm_id}.vm_esxi_id]}' identifiers on hypervisor" \
-              "Please check it manually and rename the one of the virtual machine"
-            continue 2
-          fi
-          vm_real_id="${real_vm_id}"
-        else
-          another_esxi_id="${my_params[${real_vm_id}.at]}"
-          another_esxi_names[${another_esxi_id}]="${my_config_esxi_list[${another_esxi_id}]} (${my_params[${another_esxi_id}.esxi_hostname]})"
-        fi
-      fi
-    done
-
-    my_params[${vm_real_id}.vm_id]="${vm_id}"
+    get_another_esxi_names \
+    || continue
 
     # Checking existance the virtual machine on another or this hypervisors
     if [ -z "${vm_real_id}" ]
