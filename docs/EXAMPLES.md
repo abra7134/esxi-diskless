@@ -92,7 +92,8 @@ vm-example10 at="esxi2" \
   vm_autostart="yes" \
   vm_ipv4_address="127.0.0.11" \
   vm_mac_address="00:01:02-03:04:05" \
-  vm_memory_mb=2048
+  vm_memory_mb=2048 \
+  vm_vnc_port=auto
 
 vm1-example11 at="esxi3" vm_ipv4_address="127.0.0.12"
 
@@ -195,6 +196,11 @@ $ ./control_vm_esxi.sh stop -fs esxi1/test3
 виртуальной машины `vm-example10`:
 ```bash
 ./control_vm_esxi.sh update vm_dns_servers vm-example10
+```
+
+Переназначениие порта (т.к. vm_vnc_port='auto') VNC-доступа к виртуальной машине для виртуальной машины `vm-exmaple10`:
+```bash
+./control_vm_esxi.sh update vm_vnc_port vm-example10
 ```
 
 Предварительная загрузка необходимых `ISO`-образов и `HDD`-шаблонов на все гипервизоры:

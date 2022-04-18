@@ -82,6 +82,8 @@ declare -A \
     [0.vm_ssh_username]="root"
     [0.vm_timezone]="Etc/UTC"
     [0.vm_vcpus]="1"
+    [0.vm_vnc_port]="off"
+    [0.vm_vnc_password]=""
   ) \
   my_config_esxi_list=() \
   my_config_vm_list=() \
@@ -138,18 +140,21 @@ declare -A \
     [memsize]="vm_memory_mb"
     [numvcpus]="vm_vcpus"
     [scsi0.virtualdev]="vm_hdd_devtype"
+    [special.local_iso_path]="local_iso_path"
+    [special.local_vmdk_path]="local_vmdk_path"
     [special.vm_autostart]="vm_autostart"
     [special.vm_esxi_datastore]="vm_esxi_datastore"
     [special.vm_hdd_gb]="vm_hdd_gb"
     [special.vm_mac_address]="vm_mac_address"
-    [special.local_iso_path]="local_iso_path"
-    [special.local_vmdk_path]="local_vmdk_path"
+    [special.vm_vnc_password]="vm_vnc_password"
+    [special.vm_vnc_port]="vm_vnc_port"
   )
 
 declare \
   my_updated_params=(
     "local_iso_path"
     "vm_dns_servers"
+    "vm_vnc_port"
     "vm_timezone"
   )
 
@@ -407,6 +412,52 @@ function check_vm_params {
   esac
 
   return 0
+}
+
+# Function to enable VNC-access to virtual machine
+#
+# Input:  ${my_config_esxi_list[@]}  - GLOBAL (see description at top)
+#         ${params[@]}               - GLOBAL (see description at top)
+#         ${vm_name}                 - The virtual machine name for which VNC-access will be enabled
+# Modify: ${enable_vnc_result}       - The output of govc if operation is successfule
+# Return: 0                          - The operation is successful
+#         another                    - An error occurred during the operation or
+#                                      the specified VNC-port is already in use by another virtual machine
+#
+function enable_vnc {
+  local \
+    govc_vnc_port="${params[vm_vnc_port]}" \
+    real_vm_id=""
+  enable_vnc_result=""
+
+  progress "Enable VNC-access to virtual machine (govc vm.vnc)"
+
+  if [ "${govc_vnc_port}" = "auto" ]
+  then
+    govc_vnc_port="-1"
+  else
+    for real_vm_id in "${!my_real_vm_list[@]}"
+    do
+      if [    "${my_params[${real_vm_id}.at]}" = "${esxi_id}" \
+           -a "${my_real_vm_list[${real_vm_id}]}" != "${vm_name}" \
+           -a -v my_params[${real_vm_id}.special.vm_vnc_port] \
+           -a "${my_params[${real_vm_id}.special.vm_vnc_port]}" = "${govc_vnc_port}" ]
+      then
+        enable_vnc_result="VNC-port '${govc_vnc_port}' is already used by another virtual machine with '${my_real_vm_list[${real_vm_id}]}' (id=${my_params[${real_vm_id}.vm_esxi_id]}) name"
+        echo "    ${enable_vnc_result}"
+        return 1
+      fi
+    done
+  fi
+
+  enable_vnc_result=$(
+    run_govc \
+      vm.vnc \
+      -enable=true \
+      -password="${params[vm_vnc_password]}" \
+      -port="${govc_vnc_port}" \
+      "${vm_name}"
+  )
 }
 
 # Function to run simple operation on virtual machine
@@ -976,6 +1027,7 @@ function get_real_vm_list {
     filesystems_map_filepath="" \
     filesystems_map_str="" \
     real_vm_id="" \
+    vnc_enabled="" \
     vm_esxi_datastore="" \
     vm_esxi_id="" \
     vm_esxi_vmx_filepath="" \
@@ -1201,6 +1253,7 @@ function get_real_vm_list {
                -a -s "${vmx_filepath}" ]
           then
             my_params[${real_vm_id}.vmx_parameters]="yes"
+            vnc_enabled="no"
 
             while \
               read -r \
@@ -1218,47 +1271,68 @@ function get_real_vm_list {
                 if [ -v my_params_map[${vmx_param_name}] ]
                 then
                   my_params[${real_vm_id}.${vmx_param_name}]="${vmx_param_value}"
-                elif [    "${vmx_param_name}" = "ethernet0.addresstype" \
-                       -a "${vmx_param_value}" = "generated" ]
-                then
-                  my_params[${real_vm_id}.special.vm_mac_address]="auto"
-                elif [    "${vmx_param_name}" = "ethernet0.address" \
-                       -a "${my_params[${real_vm_id}.special.vm_mac_address]}" != "auto" ]
-                then
-                  my_params[${real_vm_id}.special.vm_mac_address]="${vmx_param_value^^}"
-                elif [    "${vmx_param_name}" = "guestinfo.disk_template" ]
-                then
-                  my_params[${real_vm_id}.special.local_vmdk_path]="${vmx_param_value##*/}"
-                elif [    "${vmx_param_name}" = "scsi0:0.size_kb" ]
-                then
-                  my_params[${real_vm_id}.special.vm_hdd_gb]="$((vmx_param_value/1024/1024))"
-                elif [    "${vmx_param_name}" = "ide0:0.filename" ]
-                then
-                  # This value occurs when specified a host-based CD-ROM
-                  if [    "${vmx_param_value}" = "emptyBackingString" \
-                       -o "${vmx_param_value}" = "auto detect" \
-                       -o "${vmx_param_value}" = "" ]
-                  then
-                    :
-                  elif [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)?$ ]]
-                  then
-                    filesystem_name="${BASH_REMATCH[1]}"
-                    for filesystem_id in "${!filesystems_uuids[@]}"
-                    do
-                      if [ "${filesystem_name}" = "${filesystems_uuids[${filesystem_id}]}" ]
+                else
+                  case "${vmx_param_name}"
+                  in
+                    "ethernet0.addresstype" )
+                      [ "${vmx_param_value}" = "generated" ] \
+                      && my_params[${real_vm_id}.special.vm_mac_address]="auto"
+                      ;;
+                    "ethernet0.address" )
+                      [ "${my_params[${real_vm_id}.special.vm_mac_address]}" != "auto" ] \
+                      && my_params[${real_vm_id}.special.vm_mac_address]="${vmx_param_value^^}"
+                      ;;
+                    "guestinfo.disk_template" )
+                      my_params[${real_vm_id}.special.local_vmdk_path]="${vmx_param_value##*/}"
+                      ;;
+                    "ide0:0.filename" )
+                      # This value occurs when specified a host-based CD-ROM
+                      if [    "${vmx_param_value}" = "emptyBackingString" \
+                           -o "${vmx_param_value}" = "auto detect" \
+                           -o "${vmx_param_value}" = "" ]
                       then
-                        filesystem_name="${filesystems_names[${filesystem_id}]}"
-                        my_params[${real_vm_id}.special.vm_esxi_datastore_mapped]="yes"
-                        break
+                        :
+                      elif [[ "${vmx_param_value}" =~ ^/vmfs/volumes/([^/]+)/([^/]+/)*([^/]+)?$ ]]
+                      then
+                        filesystem_name="${BASH_REMATCH[1]}"
+                        for filesystem_id in "${!filesystems_uuids[@]}"
+                        do
+                          if [ "${filesystem_name}" = "${filesystems_uuids[${filesystem_id}]}" ]
+                          then
+                            filesystem_name="${filesystems_names[${filesystem_id}]}"
+                            my_params[${real_vm_id}.special.vm_esxi_datastore_mapped]="yes"
+                            break
+                          fi
+                        done
+                        my_params[${real_vm_id}.special.vm_esxi_datastore]="${filesystem_name}"
+                        my_params[${real_vm_id}.special.local_iso_path]="${BASH_REMATCH[3]}"
+                      else
+                        skipping \
+                          "Cannot parse the ISO-image path '${vmx_param_value}' obtained from hypervisor"
+                        continue 3
                       fi
-                    done
-                    my_params[${real_vm_id}.special.vm_esxi_datastore]="${filesystem_name}"
-                    my_params[${real_vm_id}.special.local_iso_path]="${BASH_REMATCH[3]}"
-                  else
-                    skipping \
-                      "Cannot parse the ISO-image path '${vmx_param_value}' obtained from hypervisor"
-                    continue 3
-                  fi
+                      ;;
+                    "remotedisplay.vnc.enabled" )
+                      [    "${vmx_param_value}" = "true" \
+                        -o "${vmx_param_value}" = "TRUE" ] \
+                      && vnc_enabled="yes"
+                      ;;
+                    "remotedisplay.vnc.key" )
+                      [ -z "${my_params[${real_vm_id}.special.vm_vnc_password]}" ] \
+                      && my_params[${real_vm_id}.special.vm_vnc_password]="<ENCRYPTED>"
+                      ;;
+                    "remotedisplay.vnc.password" )
+                      [ -z "${my_params[${real_vm_id}.special.vm_vnc_password]}" \
+                        -o "${my_params[${real_vm_id}.special.vm_vnc_password]}" = "<ENCRYPTED>" ] \
+                      && my_params[${real_vm_id}.special.vm_vnc_password]="${vmx_param_value}"
+                      ;;
+                    "remotedisplay.vnc.port" )
+                      my_params[${real_vm_id}.special.vm_vnc_port]="${vmx_param_value}"
+                      ;;
+                    "scsi0:0.size_kb" )
+                      my_params[${real_vm_id}.special.vm_hdd_gb]="$((vmx_param_value/1024/1024))"
+                      ;;
+                  esac
                 fi
               else
                 skipping \
@@ -1268,6 +1342,9 @@ function get_real_vm_list {
               fi
             done \
             6<"${vmx_filepath}"
+
+            [ "${vnc_enabled}" = "no" ] \
+            && my_params[${real_vm_id}.special.vm_vnc_port]="off"
 
             if [ -z "${my_params[${real_vm_id}.special.vm_esxi_datastore]}" ]
             then
@@ -1522,6 +1599,26 @@ function parse_ini_file {
            && "${value}" -le 8 ]] \
         || \
           error="it must be a number from 1 to 8"
+        ;;
+      "vm_vnc_password" )
+        [    "${#value}" -ge 0 \
+          -a "${#value}" -le 20 ] \
+        || \
+          error="it length must be from 0 to 20 characters"
+        ;;
+      "vm_vnc_port" )
+        if [[ "${value}" =~ ^[[:digit:]]+$ ]]
+        then
+          if [    "${value}" -lt 1024 \
+               -o "${value}" -gt 65535 ]
+          then
+            error="it must be a number from 1024 to 65535"
+          fi
+        elif [    "${value}" != "auto" \
+               -a "${value}" != "off" ]
+        then
+          error="it must be 'auto', 'off' or number from 1024 to 65535 value"
+        fi
         ;;
       * )
         [ -z "${value}" \
@@ -2891,8 +2988,13 @@ function show_processed_status {
       "For accurate validation of loaded images please do not use the '-ff' and '-t' options together"
   fi
 
-  if [ -n "${update_param}" \
-       -a "${update_param}" != "local_iso_path" ]
+  if [ "${update_param}" = "vm_vnc_port" ]
+  then
+    attention \
+      "Updating the '${update_param}' parameter also updates the value of 'vm_vnc_password' parameter" \
+      "Port only or password only update is not currently supported"
+  elif [ -n "${update_param}" \
+         -a "${update_param}" != "local_iso_path" ]
   then
     attention \
       "Updating the '${update_param}' parameter gives only a DELAYED effect !!!" \
@@ -3314,6 +3416,7 @@ function command_create {
     no_pinging_vms=0 \
     runned_vms=0
   local \
+    enable_vnc_result="" \
     another_esxi_id="" \
     another_vm_real_id="" \
     autostart_param="" \
@@ -3900,6 +4003,28 @@ function command_create {
       let runned_vms+=1
     fi
 
+    if [ "${params[vm_vnc_port]}" != "off" ]
+    then
+      if ! \
+        enable_vnc
+      then
+        enable_vnc_result="VNC failed because: ${enable_vnc_result:-see details in log above}"
+        my_vm_ids[${vm_id}]+="${COLOR_RED}/VNC FAILED${COLOR_NORMAL}"
+      else
+        if [[ "${enable_vnc_result}" =~ ^"${vm_name}: "(vnc://.+)$ ]]
+        then
+          enable_vnc_result="VNC-access available by URL: ${BASH_REMATCH[1]}"
+          echo "    ${enable_vnc_result}"
+          my_vm_ids[${vm_id}]+="${COLOR_GREEN}/VNC ENABLED${COLOR_NORMAL}"
+        else
+          enable_vnc_result="Failed to parse URL for VNC-access in string: ${enable_vnc_result}"
+          echo "    ${enable_vnc_result}"
+          enable_vnc_result="${enable_vnc_result% in string: *}"
+          my_vm_ids[${vm_id}]+="${COLOR_YELLOW}/VNC UNKNOWN${COLOR_NORMAL}"
+        fi
+      fi
+    fi
+
     if [ -n "${params[local_iso_path]}" \
          -o -n "${params[local_vmdk_path]}" ]
     then
@@ -3907,6 +4032,12 @@ function command_create {
       my_vm_ids[${vm_id}]+="${params[local_iso_path]:+on '${params[local_iso_path]}'}"
       my_vm_ids[${vm_id}]+="${params[local_vmdk_path]:+${params[local_iso_path]:+ and }with HDD from '${params[local_vmdk_path]}'}"
       my_vm_ids[${vm_id}]+=")"
+    fi
+
+    if [    "${params[vm_vnc_port]}" != "off" \
+         -a -n "${enable_vnc_result}" ]
+    then
+      my_vm_ids[${vm_id}]+=" (${enable_vnc_result})"
     fi
 
     if [ -n "${another_vm_real_id}" ]
@@ -4309,6 +4440,10 @@ function command_ls {
           "$(print_param vm_ipv4_gateway ${vm_id})" \
           "$(print_param vm_ipv4_netmask ${vm_id})"
         printf -- \
+          "    vm_vnc_port=\"%s\" vm_vnc_password=\"%s\"\n" \
+          "$(print_param vm_vnc_port ${vm_id})" \
+          "$(print_param vm_vnc_password ${vm_id})"
+        printf -- \
           "    local_iso_path=\"%s\"\n" \
           "$(print_param local_iso_path ${vm_id})"
         printf -- \
@@ -4545,7 +4680,8 @@ function command_show {
                   real_value="(NOT FOUND)"
                 fi
 
-                if [ "${config_param}" != "local_iso_path" ] \
+                if [    "${config_param}" != "local_iso_path" \
+                     -a "${config_param}" != "vm_vnc_port" ] \
                    && \
                     finded_duplicate \
                       "${config_param}" \
@@ -4747,6 +4883,7 @@ function command_update {
     cdrom_id_file="${temp_dir}/cdrom_id" \
     cdrom_type="" \
     cdrom_iso_path="" \
+    enable_vnc_result="" \
     esxi_id="" \
     esxi_name="" \
     last_vm_id="" \
@@ -4809,10 +4946,11 @@ function command_update {
     update_param_old_value="${my_params[${vm_real_id}.${update_param_mapped}]:-}"
     if [ "${params[${update_param}]}" = "${update_param_old_value}" ]
     then
-      my_vm_ids[${vm_id}]="${COLOR_YELLOW}UPDATE NOT REQUIRED${COLOR_NORMAL}"
+      my_vm_ids[${vm_id}]="${COLOR_YELLOW}UPDATE NOT REQUIRED${COLOR_NORMAL} (${update_param}='${update_param_old_value}')"
       continue
     fi
 
+    enable_vnc_result=""
     if [ "${update_param}" = "local_iso_path" ]
     then
       if [ -n "${update_param_old_value}" ]
@@ -4913,6 +5051,49 @@ function command_update {
           continue
         fi
       fi
+
+      my_params[${vm_real_id}.status]="image updated"
+
+    elif [ "${update_param}" = "vm_vnc_port" ]
+    then
+      if [    "${params[${update_param}]}" = "off" \
+           -o "${params[${update_param}]}" = "auto" ]
+      then
+        progress "Disable a VNC-access to virtual machine (govc vm.vnc)"
+
+        if ! \
+          govc_output=$(
+            run_govc \
+              vm.vnc \
+              -disable=true \
+              "${vm_name}"
+          )
+        then
+          skipping \
+            "Unable to disable a VNC-access"
+        fi
+      fi
+
+      if [ "${params[${update_param}]}" != "off" ]
+      then
+        if ! \
+          enable_vnc
+        then
+          skipping \
+            "Unable to enable VNC-access to virtual machine"
+          continue
+        else
+          if [[ "${enable_vnc_result}" =~ ^"${vm_name}: "(vnc://.+)$ ]]
+          then
+            enable_vnc_result="VNC-access available by URL: ${BASH_REMATCH[1]}"
+            echo "    ${enable_vnc_result}"
+          else
+            enable_vnc_result="Failed to parse URL for VNC-access in string: ${enable_vnc_result}"
+            echo "    ${enable_vnc_result}"
+            enable_vnc_result="${enable_vnc_result% in string: *}"
+          fi
+        fi
+      fi
     else
       progress "Update the '${update_param}' parameter (govc vm.change)"
       if ! \
@@ -4944,8 +5125,7 @@ function command_update {
       "${vm_real_id}" \
       ""
 
-    my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param}='${params[${update_param}]}')"
-    my_params[${vm_real_id}.status]="image updated"
+    my_vm_ids[${vm_id}]="${COLOR_GREEN}UPDATED${COLOR_NORMAL} (${update_param}='${params[${update_param}]}')${enable_vnc_result:+ (${enable_vnc_result})}"
     let updated_vms+=1
   done
 

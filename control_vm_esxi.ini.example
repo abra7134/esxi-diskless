@@ -56,6 +56,8 @@
 #vm_ssh_username="root"
 #vm_timezone="Etc/UTC"
 #vm_vcpus=1
+#vm_vnc_port="off"
+#vm_vnc_password=""
 
 [esxi_list]
 
