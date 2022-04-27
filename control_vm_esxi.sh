@@ -457,7 +457,21 @@ function enable_vnc {
       -password="${params[vm_vnc_password]}" \
       -port="${govc_vnc_port}" \
       "${vm_name}"
-  )
+  ) \
+  || return
+
+  # Hack for Esxi v6.7+
+  # Re-set password, because otherwise there will be a password-free login
+  if ! \
+    run_govc \
+      vm.change \
+      -e "remotedisplay.vnc.password=${params[vm_vnc_password]}" \
+      -vm "${vm_name}"
+  then
+    enable_vnc_result="Unable to re-set password (hack for ESXi v6.7+)"
+    echo "    ${enable_vnc_result}"
+    return 1
+  fi
 }
 
 # Function to run simple operation on virtual machine
@@ -2992,7 +3006,9 @@ function show_processed_status {
   then
     attention \
       "Updating the '${update_param}' parameter also updates the value of 'vm_vnc_password' parameter" \
-      "Port only or password only update is not currently supported"
+      "Port or password only update is not currently supported" \
+      "" \
+      "In ESXi v6.7+ updating gives only a DELAYED effect, restart of virtual machines is REQUIRED !!!"
   elif [ -n "${update_param}" \
          -a "${update_param}" != "local_iso_path" ]
   then
@@ -3416,10 +3432,11 @@ function command_create {
     no_pinging_vms=0 \
     runned_vms=0
   local \
-    enable_vnc_result="" \
     another_esxi_id="" \
     another_vm_real_id="" \
     autostart_param="" \
+    enable_vnc_result="" \
+    enable_vnc_status="" \
     esxi_free_memory_kb="" \
     esxi_free_memory_filepath="" \
     esxi_free_storage_kb="" \
@@ -3914,6 +3931,13 @@ function command_create {
       my_vm_ids[${another_vm_real_id}]="${COLOR_YELLOW}STOPPED${COLOR_NORMAL}"
     fi
 
+    if [ "${params[vm_vnc_port]}" != "off" ]
+    then
+      enable_vnc_status=""
+      enable_vnc \
+      && enable_vnc_status="ok"
+    fi
+
     if ! \
       esxi_vm_simple_command \
         "power on" \
@@ -4005,8 +4029,7 @@ function command_create {
 
     if [ "${params[vm_vnc_port]}" != "off" ]
     then
-      if ! \
-        enable_vnc
+      if [ "${enable_vnc_status}" != "ok" ]
       then
         enable_vnc_result="VNC failed because: ${enable_vnc_result:-see details in log above}"
         my_vm_ids[${vm_id}]+="${COLOR_RED}/VNC FAILED${COLOR_NORMAL}"
